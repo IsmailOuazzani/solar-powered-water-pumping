@@ -1,0 +1,7 @@
+netCDF4
+pvlib
+seaborn
+cartopy
+xarray
+matplotlib
+numpy
