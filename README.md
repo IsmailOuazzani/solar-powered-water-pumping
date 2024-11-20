@@ -1,1 +1,1 @@
-# solar-powered-water-pumping
+# Solar Powered Water Pumping
