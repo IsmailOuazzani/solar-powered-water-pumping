@@ -6,8 +6,17 @@ import cartopy.feature as cfeature
 from matplotlib import cm
 
 
-def plot_heatmap(lon_lat_pairs: list[tuple[float]], values: np.ndarray, output_file: str, legend: str):
+def plot_heatmap(lon_lat_pairs: list[tuple[float]], values: np.ndarray, output_file: str, legend: str, hue_style: str = "blue"):
     fig, axes = plt.subplots(1, 2, figsize=(16, 8), subplot_kw={'projection': ccrs.PlateCarree()})
+
+    if hue_style == "blue":
+        cmap = cm.Blues
+    elif hue_style == "red":
+        cmap = cm.Reds
+    elif hue_style == "orange":
+        cmap = cm.Oranges
+    else:
+        raise ValueError("Invalid hue_style. Choose either 'water' or 'power'.")
 
     def style_map(ax, title, extent=None):
         ax.add_feature(cfeature.LAND, facecolor='lightgray')
@@ -22,7 +31,7 @@ def plot_heatmap(lon_lat_pairs: list[tuple[float]], values: np.ndarray, output_f
     lon_within_mask = [coord[0] for coord in lon_lat_pairs]
     lat_within_mask = [coord[1] for coord in lon_lat_pairs]
     norm = plt.Normalize(vmin=values.min(), vmax=values.max())
-    colors = cm.viridis(norm(values))
+    colors = cmap(norm(values))
 
     ax1 = axes[0]
     ax1.scatter(lon_within_mask, lat_within_mask, color=colors, s=20, transform=ccrs.PlateCarree())
@@ -36,7 +45,7 @@ def plot_heatmap(lon_lat_pairs: list[tuple[float]], values: np.ndarray, output_f
     ax2.scatter(lon_within_mask, lat_within_mask, color=colors, s=20, transform=ccrs.PlateCarree())
     style_map(ax2, "Zoomed View ", extent=[min_lon, max_lon, min_lat, max_lat])
 
-    sm = plt.cm.ScalarMappable(cmap=cm.viridis, norm=norm)
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cbar_ax = fig.add_axes([0.25, 0.1, 0.5, 0.02]) 
     cbar = plt.colorbar(sm, cax=cbar_ax, orientation='horizontal')
@@ -48,12 +57,11 @@ def plot_heatmap(lon_lat_pairs: list[tuple[float]], values: np.ndarray, output_f
 
 
 
-def mask_lon_lat(lon: np.ndarray, lat: np.ndarray, plot: bool = True) -> list[tuple[float, float]]:
+def mask_lon_lat(lon: np.ndarray, lat: np.ndarray, country_name: str, plot: bool = True) -> list[tuple[float, float]]:
     import regionmask
     countries = regionmask.defined_regions.natural_earth_v5_1_2.countries_50
 
     # TODO: make this configurable
-    country_name = "Senegal"
     country_index = countries.map_keys(country_name)
 
     lon_grid, lat_grid = np.meshgrid(lon, lat)

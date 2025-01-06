@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 
 DATASETS = {
-    "M2T1NXRAD_5-2023_only_SWGDN": "/media/ismail/WDC/datasets/M2T1NXRAD_5-2023_only_SWGDN.nc4"
+    "M2T1NXRAD_5-2023_only_SWGDN": "datasets/M2T1NXRAD_5-2023_only_SWGDN.nc4"
 }
 
 def extract_variables(data_folder: Path, variable: str, dataset_output_path: Path):
@@ -38,7 +38,7 @@ def extract_variables(data_folder: Path, variable: str, dataset_output_path: Pat
 def import_merra2_dataset(dataset_path: Path, variables: list[str]) -> xr.Dataset:
     logging.debug(f"Opening dataset at {dataset_path}...")
     ds = xr.open_dataset(dataset_path)[variables]
-    logging.info(f"Successfuly opened dataset. Summary:\n{ds.info()}")
+    logging.info(f"Successfuly opened dataset. Summary:\n{ds}") # TODO: fix info not displaying
     return ds
 
     
