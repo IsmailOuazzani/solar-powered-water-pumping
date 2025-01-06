@@ -41,38 +41,6 @@ def import_merra2_dataset(dataset_path: Path, variables: list[str]) -> xr.Datase
     logging.info(f"Successfuly opened dataset. Summary:\n{ds.info()}")
     return ds
 
-# def mask_dataset(dataset: xr.Dataset) -> xr.Dataset:
-#     # TODO: make dataset region configurable
-#     import regionmask
-#     countries = regionmask.defined_regions.natural_earth_v5_1_2.countries_50
-#     country_index = countries.map_keys('Morocco')
-#     mask = countries.mask(dataset)
-#     dataset_masked = dataset.where(mask == country_index)
-
-#     import matplotlib.pyplot as plt
-#     mask.plot()
-#     plt.savefig("maskmok.png")
-#     print("saved fig haha")
-#     plt.clf()
-
-#     plt.figure(figsize=(10, 5))
-
-#     # Plot original dataset
-#     plt.subplot(1, 2, 1)
-#     dataset.isel(time=0).SWGDN.plot()  # Replace 'variable_name' with your data variable
-#     plt.title("Original Dataset")
-
-#     # Plot masked dataset
-#     plt.subplot(1, 2, 2)
-#     dataset_masked.isel(time=0).SWGDN.plot()  # Replace 'variable_name' with your data variable
-#     plt.title(f"Dataset with Masked Out")
-
-#     plt.tight_layout()
-#     plt.savefig("maskmoh.png")
-
-#     return dataset_masked
-
-
     
 if __name__ == "__main__":
     # extract_variables(
@@ -80,4 +48,5 @@ if __name__ == "__main__":
     #     dataset_output_path=Path("/media/ismail/WDC/datasets"),
     #     variable="SWGDN"
     # )
+    # TODO: turn this into argparse... or click?
     ...
