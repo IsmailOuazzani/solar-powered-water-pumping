@@ -5,3 +5,5 @@ cartopy
 xarray
 matplotlib
 numpy
+tqdm
+regionmask

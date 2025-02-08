@@ -14,7 +14,13 @@ def make_pv_system(latitude: float, longitude: float) -> pvlib.modelchain.ModelC
     sandia_modules = pvlib.pvsystem.retrieve_sam('SandiaMod')
     sapm_inverters = pvlib.pvsystem.retrieve_sam('cecinverter')
 
-    module = sandia_modules['AstroPower_AP_1206___1998_'] #  From B. Bouzidi paper (2013)
+    #  From B. Bouzidi paper (2013)
+    # 500$/unit according to https://library.uniteddiversity.coop/Energy/Home.Power.Magazine/Home_Power_Magazine_078.PDF
+    # 330$/unit according to Bouzidi paper
+    module = sandia_modules['AstroPower_AP_1206___1998_'] 
+
+
+
     inverter = sapm_inverters['ABB__MICRO_0_25_I_OUTD_US_208__208V_'] # https://www.solaris-shop.com/abb-micro-0-25-i-outd-us-208-240-250w-microinverter/
     temperature_model_parameters = pvlib.temperature.TEMPERATURE_MODEL_PARAMETERS['sapm']['open_rack_glass_glass']
     array = pvlib.pvsystem.Array(

@@ -44,7 +44,7 @@ def plot_loss_function(deficit, demand, loss_fn: Callable):
     
     sns.lineplot(x=range(len(loss)), y=loss, linewidth=2, color="blue")
     plt.title(f"Loss Function: {loss_fn_name}", fontsize=16, fontweight="bold")
-    plt.xlabel("Index", fontsize=14)
+    plt.xlabel("Days", fontsize=14)
     plt.ylabel("Loss Value", fontsize=14)
     
     plt.text(0.05, 0.95, f"Deficit: {deficit}\nDemand: {demand}",
