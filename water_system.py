@@ -29,14 +29,14 @@ def simulate_water_tank(results: pd.DataFrame, tank_capacity: float) -> pd.DataF
     Given a DataFrame 'results' containing water pumped and water demand columns,
     compute the water level in the tank and the water deficit over time.
     """
-    water_in_tank: list[float] = [tank_capacity]  # initial condition: full tank
-    water_deficit: list[float] = [0]
+    water_in_tank = [tank_capacity]  # initial condition: full tank
+    water_deficit = [0]
 
     for i in range(1, len(results)):
-        new_level: float = water_in_tank[-1] + results["water_pumped"].iloc[i] - results["water_demand"].iloc[i]
+        new_level = water_in_tank[-1] + results["water_pumped"].iloc[i] - results["water_demand"].iloc[i]
         if new_level < 0:
             water_deficit.append(abs(new_level))
-            constrained_level: float = 0
+            constrained_level = 0
         else:
             constrained_level = min(new_level, tank_capacity)
             water_deficit.append(0)
