@@ -38,7 +38,7 @@ def extract_variables(data_folder: Path, variable: str, dataset_output_path: Pat
 def import_merra2_dataset(dataset_path: Path, variables: list[str]) -> xr.Dataset:
     logging.debug(f"Opening dataset at {dataset_path}...")
     ds = xr.open_dataset(dataset_path)[variables]
-    logging.info(f"Successfuly opened dataset. Summary:\n{ds}") # TODO: fix info not displaying
+    logging.info(f"Successfuly opened dataset. Summary:\n{ds}") 
     return ds
 
     

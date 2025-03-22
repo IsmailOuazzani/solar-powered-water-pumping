@@ -6,6 +6,11 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
+COST_PER_PANEL = 330 # From Bouzidi paper  
+COST_POWER_INVERTER = 411
+COST_PUMP = 750
+COST_PER_M3_TANK = 285 # From Ahmed and Demirci paper
+
 def make_pv_system(latitude: float, longitude: float) -> pvlib.modelchain.ModelChain:
     location = pvlib.location.Location(latitude=latitude, longitude=longitude)
     mount = pvlib.pvsystem.FixedMount(surface_tilt=latitude)
@@ -31,3 +36,13 @@ def make_pv_system(latitude: float, longitude: float) -> pvlib.modelchain.ModelC
     )
     system = pvlib.pvsystem.PVSystem(arrays=[array], inverter_parameters=inverter)
     return pvlib.modelchain.ModelChain(system, location)
+
+
+def appraise_system(number_solar_panels: int, tank_capacity: float) -> float:
+    """
+    Calculate a cost metric for the system configuration.
+    """
+    cost = COST_POWER_INVERTER + COST_PUMP
+    cost += tank_capacity * COST_PER_M3_TANK
+    cost += number_solar_panels * COST_PER_PANEL
+    return cost / 400
