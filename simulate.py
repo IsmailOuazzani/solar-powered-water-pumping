@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.DEBUG)
 # TODO: it might become more intuitive to use storage volume instead of storage factor
 
 
-COUNTRY="Morocco"
+COUNTRY="Algeria"
 OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -136,7 +136,7 @@ def evaluate_system(
     return lpsp_total(water_deficit, water_demand)
 
 def run_optimisation(
-    results: pd.DataFrame, panels_range: np.ndarray, storage_range: np.ndarray
+    results: pd.DataFrame, panels_range: np.ndarray, storage_range: np.ndarray, target_loss: float | None = None
 ) -> tuple[np.ndarray, np.ndarray, list[int], list[dict[str, float]]]:
     # TODO: only pass the power column to this to better separate concerns
     """
@@ -146,19 +146,25 @@ def run_optimisation(
     hyperparams: list[dict[str, float]] = []
     for num in panels_range:
         for storage in storage_range:
-            hyperparams.append({"number_solar_panels": float(num), "storage_factor": float(storage)})
-
-    losses: list[float] = []
+            cost = appraise_system(
+                number_solar_panels=int(num),
+                tank_capacity=24 * storage * WATER_DEMAND_HOURLY
+            )
+            hyperparams.append({
+                "number_solar_panels": float(num), 
+                "storage_factor": float(storage),
+                "cost": cost
+                })
+    hyperparams = sorted(hyperparams, key=lambda x: x["cost"])
+    losses: list[float] = [] # TODO: group, with hyperparams, into a Config class
     costs: list[float] = []
     for config in tqdm(hyperparams, desc="Evaluating configurations"):
-        # TODO: early stop if config found with loss < TARGET_LOSS, since parameters are sorted by ascending cost
         loss = evaluate_system(results, int(config["number_solar_panels"]), config["storage_factor"])
-        cost = appraise_system(
-            number_solar_panels=int(config["number_solar_panels"]),
-            tank_capacity=24 * config["storage_factor"] * WATER_DEMAND_HOURLY)
         logger.debug(f"Config {config} -> loss: {loss}, cost: {cost}")
         losses.append(loss)
-        costs.append(cost)
+        costs.append(config["cost"])
+        if target_loss is not None and loss < target_loss:
+            break
 
     losses_arr: np.ndarray = np.array(losses)
     costs_arr: np.ndarray = np.array(costs)
@@ -382,7 +388,12 @@ if __name__ == "__main__":
                 num_panels=NUMBER_SOLAR_PANELS,
                 storage_factor=STORAGE_FACTOR
             )
-            losses_arr, costs_arr, pareto_indices, hyperparams = run_optimisation(results, OPTIM_NUM_PANELS_RANGE, OPTIM_NUM_STORAGE_FACTOR_RANGE)
+            losses_arr, costs_arr, pareto_indices, hyperparams = run_optimisation(
+                results=results, 
+                panels_range=OPTIM_NUM_PANELS_RANGE, 
+                storage_range=OPTIM_NUM_STORAGE_FACTOR_RANGE,
+                target_loss=TARGET_LOSS
+            )
             valid_pareto_indices = [i for i in pareto_indices if losses_arr[i] < TARGET_LOSS]
             best_config_index = np.argmin(costs_arr[valid_pareto_indices])
             best_index = valid_pareto_indices[best_config_index]
