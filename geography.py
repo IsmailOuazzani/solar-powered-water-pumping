@@ -26,8 +26,10 @@ def plot_heatmap(lon_lat_pairs: list[tuple[float]], values: np.ndarray, output_f
         cmap = cm.Reds
     elif hue_style == "orange":
         cmap = cm.Oranges
+    elif hue_style == "green":
+        cmap = cm.Greens
     else:
-        raise ValueError("Invalid hue_style. Choose either 'blue', 'red', or 'orange'.")
+        raise ValueError("Invalid hue_style. Choose either 'blue', 'red', 'green', or 'orange'.")
 
     lon_within_mask = [coord[0] for coord in lon_lat_pairs]
     lat_within_mask = [coord[1] for coord in lon_lat_pairs]

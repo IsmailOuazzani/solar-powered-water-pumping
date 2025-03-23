@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.DEBUG)
 # TODO: it might become more intuitive to use storage volume instead of storage factor
 
 
-COUNTRY="Burundi"
+COUNTRY="Morocco"
 OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -44,7 +44,7 @@ HYDRAULIC_CONSTANT = 2.725
 # Optimisation
 OPTIM_NUM_PANELS_RANGE = np.linspace(1, 100, 10)
 OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 2, 10)
-TARGET_LOSS = 0.05
+TARGET_LOSS = 0.01
 SHORTAGE_THRESHOLD = 0.1 # 10% of tank volume
 
 def simulate_at_location(
@@ -138,6 +138,7 @@ def evaluate_system(
 def run_optimisation(
     results: pd.DataFrame, panels_range: np.ndarray, storage_range: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, list[int], list[dict[str, float]]]:
+    # TODO: only pass the power column to this to better separate concerns
     """
     Run hyperparameter optimisation for different configurations.
     Returns arrays of losses, costs, Pareto front indices, and the list of hyperparameter configurations.
@@ -150,6 +151,7 @@ def run_optimisation(
     losses: list[float] = []
     costs: list[float] = []
     for config in tqdm(hyperparams, desc="Evaluating configurations"):
+        # TODO: early stop if config found with loss < TARGET_LOSS, since parameters are sorted by ascending cost
         loss = evaluate_system(results, int(config["number_solar_panels"]), config["storage_factor"])
         cost = appraise_system(
             number_solar_panels=int(config["number_solar_panels"]),
@@ -222,7 +224,11 @@ def plot_optimisation_results(
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--type", type=str, default="local", help="Type of simulation to run: global or local")
+    parser.add_argument("--type", 
+                        type=str, 
+                        default="local", 
+                        choices={"local", "global", "global-optim"},
+                        help="Type of simulation to run")
     args = parser.parse_args()
 
     solar_radiation_ds = import_merra2_dataset(
@@ -294,21 +300,6 @@ if __name__ == "__main__":
             hue_style="red"
         )
 
-        # Analyse correlations in a correlogram
-        # TODO: might be more interesting if done for best configurations only
-        df = pd.DataFrame({
-            "loss": losses_total,
-            "shortage days": shortage_days,
-            "average solar radiation": solar_radation_averages
-        })
-        corr = df.corr()
-        plt.figure(figsize=(8, 6))
-        sns.heatmap(corr, annot=True, cmap="coolwarm")
-        plt.title("Correlation Matrix")
-        plt.savefig(OUTPUT_DIR / "global_correlation_matrix.png")
-
-
-
     # ----------------- Optimisation at single point  ----------------- #
     if args.type == "local":
         logging.info("Starting local optimization")
@@ -368,6 +359,84 @@ if __name__ == "__main__":
 
         num_shortage_days = (end_of_day_tank_capacity < SHORTAGE_THRESHOLD * tank_capacity).sum()
         logger.info(f"Number of days with water shortage: {num_shortage_days}")
+
+    # ----------------- Optimisation for all the points  ----------------- #
+    if args.type == "global-optim":
+        start_mask = perf_counter()
+        longitudes = solar_radiation_ds['lon'].values  
+        latitudes = solar_radiation_ds['lat'].values 
+        lon_lat_pairs = mask_lon_lat(longitudes,latitudes, country_name=COUNTRY, plot=False)
+        logging.info(f"Masked {100*(1-len(lon_lat_pairs)/(len(longitudes)*len(latitudes)))}% of data points in {perf_counter()-start_mask}s.")
+
+        best_configs = []
+        losses = []
+        costs = []
+        shortage_days = []
+
+        logging.info("Starting global optimization")
+        for longitude, latitude in tqdm(lon_lat_pairs):
+            results, tank_capacity = simulate_at_location(
+                solar_radiation_ds=solar_radiation_ds, 
+                latitude=latitude, 
+                longitude=longitude,
+                num_panels=NUMBER_SOLAR_PANELS,
+                storage_factor=STORAGE_FACTOR
+            )
+            losses_arr, costs_arr, pareto_indices, hyperparams = run_optimisation(results, OPTIM_NUM_PANELS_RANGE, OPTIM_NUM_STORAGE_FACTOR_RANGE)
+            valid_pareto_indices = [i for i in pareto_indices if losses_arr[i] < TARGET_LOSS]
+            best_config_index = np.argmin(costs_arr[valid_pareto_indices])
+            best_index = valid_pareto_indices[best_config_index]
+            best_config = hyperparams[best_index]
+            best_configs.append(best_config)
+            losses.append(losses_arr[best_index])
+            costs.append(costs_arr[best_index])
+
+            results_best, tank_capacity = simulate_at_location(
+                solar_radiation_ds=solar_radiation_ds, 
+                latitude=latitude, 
+                longitude=longitude,
+                num_panels=best_config["number_solar_panels"],
+                storage_factor=best_config["storage_factor"]
+            )
+            volume_at_end_of_day = results_best[results_best.index.strftime('%H:%M') == "23:30"].water_in_tank
+            volume_at_end_of_day = volume_at_end_of_day[:-1]
+            num_shortage_days = (volume_at_end_of_day < SHORTAGE_THRESHOLD * tank_capacity).sum()
+            shortage_days.append(num_shortage_days)
+
+        # Save results
+        best_configs_df = pd.DataFrame(best_configs)
+        best_configs_df["loss"] = losses
+        best_configs_df["cost"] = costs
+        best_configs_df["shortage_days"] = shortage_days
+        best_configs_df.to_csv(OUTPUT_DIR / "best_configs.csv")
+        logger.info(f"Saved best configurations to {OUTPUT_DIR / 'best_configs.csv'}")
+
+        plot_heatmap(
+            lon_lat_pairs=lon_lat_pairs,
+            values=np.array(costs),
+            output_file=OUTPUT_DIR / "best_config_costs.png",
+            legend="Best Config Cost per community member (USD)",
+            hue_style="green"
+        )
+        plot_heatmap(
+            lon_lat_pairs=lon_lat_pairs,
+            values=np.array(shortage_days),
+            output_file=OUTPUT_DIR / "best_config_shortage_days.png",
+            legend="Best Config Number of days with water shortage",
+            hue_style="red"
+        )
+
+        # Analyse correlations 
+        corr = best_configs_df.corr()
+        plt.figure(figsize=(10, 10))
+        sns.heatmap(corr, annot=True, cmap="coolwarm")
+        plt.title("Correlation Matrix")
+        plt.savefig(OUTPUT_DIR / "global_correlation_matrix_best_config.png")
+
+
+        # TODO: analyse this for all configs, not just the best ones    
+
+
 
 
 
