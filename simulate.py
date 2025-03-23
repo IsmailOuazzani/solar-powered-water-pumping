@@ -15,6 +15,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from loss_analysis import lpsp, lpsp_total, clpsp
 from time import perf_counter
+import seaborn as sns
 from pathlib import Path
 import xarray as xr
 from argparse import ArgumentParser
@@ -44,6 +45,7 @@ HYDRAULIC_CONSTANT = 2.725
 OPTIM_NUM_PANELS_RANGE = np.linspace(1, 100, 10)
 OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 2, 10)
 TARGET_LOSS = 0.05
+SHORTAGE_THRESHOLD = 0.1 # 10% of tank volume
 
 def simulate_at_location(
     longitude: float,
@@ -152,7 +154,7 @@ def run_optimisation(
         cost = appraise_system(
             number_solar_panels=int(config["number_solar_panels"]),
             tank_capacity=24 * config["storage_factor"] * WATER_DEMAND_HOURLY)
-        logger.info(f"Config {config} -> loss: {loss}, cost: {cost}")
+        logger.debug(f"Config {config} -> loss: {loss}, cost: {cost}")
         losses.append(loss)
         costs.append(cost)
 
@@ -220,13 +222,14 @@ def plot_optimisation_results(
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--type", type=str, default="global", help="Type of simulation to run: global or local")
+    parser.add_argument("--type", type=str, default="local", help="Type of simulation to run: global or local")
     args = parser.parse_args()
 
     solar_radiation_ds = import_merra2_dataset(
         DATASETS["M2T1NXRAD_5-2023_only_SWGDN"], 
         variables=["SWGDN"]) # TODO: pass dataset name as argparse argument
     
+     # ----------------- Simulation over all points ----------------- #
     if args.type == "global":
         # Mask points outside of selected country
         longitudes = solar_radiation_ds['lon'].values  
@@ -235,19 +238,18 @@ if __name__ == "__main__":
         lon_lat_pairs = mask_lon_lat(longitudes,latitudes, country_name=COUNTRY, plot=False)
         logging.info(f"Masked {100*(1-len(lon_lat_pairs)/(len(longitudes)*len(latitudes)))}% of data points in {perf_counter()-start_mask}s.")
     
-
-        # ----------------- Simulation over all points ----------------- #
         pv_outputs = []
         pv_outputs_sums = []
         losses_total = []
+        shortage_days = []
+        solar_radation_averages = []
         final_water_levels_jan1 = [] # TODO: rename
-
         
         for longitude, latitude in tqdm(lon_lat_pairs):
-            logging.info(f"Simulating system at {longitude}, {latitude}...")
+            logging.debug(f"Simulating system at {longitude}, {latitude}...")
             results, tank_capacity = simulate_at_location(
                 solar_radiation_ds=solar_radiation_ds, 
-                latitude=latitude, 
+                latitude=latitude, # TODO: change this to pass only location_ds
                 longitude=longitude,
                 num_panels=NUMBER_SOLAR_PANELS,
                 storage_factor=STORAGE_FACTOR
@@ -263,8 +265,16 @@ if __name__ == "__main__":
                 storage_factor=STORAGE_FACTOR)
             losses_total.append(loss)
 
+            volume_at_end_of_day = results[results.index.strftime('%H:%M') == "23:30"].water_in_tank
+            volume_at_end_of_day = volume_at_end_of_day[:-1] # TODO: fix datasets to not have this
+            num_shortage_days = (volume_at_end_of_day < SHORTAGE_THRESHOLD * tank_capacity).sum()
+            shortage_days.append(num_shortage_days)
+
+            average_solar_radiation = solar_radiation_ds.sel(lat=latitude, lon=longitude, method="nearest").SWGDN.mean().values
+            solar_radation_averages.append(average_solar_radiation)
+
         first_data_point_pv = pv_outputs[0]
-        plot_water_simulation(first_data_point_pv, "2023-12-21", tank_capacity, "")
+        plot_water_simulation(first_data_point_pv, "2023-12-21", tank_capacity, "") # TODO:move this to local section
         plot_heatmap(lon_lat_pairs=lon_lat_pairs, 
                     values=np.array(pv_outputs_sums), 
                     output_file="outputs/total_power.png", 
@@ -283,6 +293,20 @@ if __name__ == "__main__":
             legend="Loss function (Loss of Power Supply Probability)",
             hue_style="red"
         )
+
+        # Analyse correlations in a correlogram
+        # TODO: might be more interesting if done for best configurations only
+        df = pd.DataFrame({
+            "loss": losses_total,
+            "shortage days": shortage_days,
+            "average solar radiation": solar_radation_averages
+        })
+        corr = df.corr()
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(corr, annot=True, cmap="coolwarm")
+        plt.title("Correlation Matrix")
+        plt.savefig(OUTPUT_DIR / "global_correlation_matrix.png")
+
 
 
     # ----------------- Optimisation at single point  ----------------- #
@@ -341,6 +365,11 @@ if __name__ == "__main__":
                         cmap="RdYlBu",
                         colorbar=True)
         plt.savefig(OUTPUT_DIR / "water_in_tank_end_of_day.png")
+
+        num_shortage_days = (end_of_day_tank_capacity < SHORTAGE_THRESHOLD * tank_capacity).sum()
+        logger.info(f"Number of days with water shortage: {num_shortage_days}")
+
+
 
 
         

@@ -32,6 +32,8 @@ def simulate_water_tank(results: pd.DataFrame, tank_capacity: float) -> pd.DataF
     water_in_tank = [tank_capacity]  # initial condition: full tank
     water_deficit = [0]
 
+    # TODO: add a column for excess water/energy, or justify in the report why cost optimization takes care of it
+
     for i in range(1, len(results)):
         new_level = water_in_tank[-1] + results["water_pumped"].iloc[i] - results["water_demand"].iloc[i]
         if new_level < 0:
