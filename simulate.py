@@ -26,7 +26,6 @@ import numpy as np
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
-# TODO: it might become more intuitive to use storage volume instead of storage factor
 
 
 COUNTRY="Algeria"
@@ -42,8 +41,8 @@ NUMBER_SOLAR_PANELS = 43  # optimal result in Bouzidi paper
 HYDRAULIC_CONSTANT = 2.725
 
 # Optimisation
-OPTIM_NUM_PANELS_RANGE = np.linspace(1, 100, 10)
-OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 2, 10)
+OPTIM_NUM_PANELS_RANGE = np.linspace(20, 100, 10)
+OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 2, 10) # TODO: it might become more intuitive to use storage volume instead of storage factor
 TARGET_LOSS = 0.01
 SHORTAGE_THRESHOLD = 0.1 # 10% of tank volume
 
@@ -93,6 +92,7 @@ def run_pv_simulation(solar_radiation_ds: xr.Dataset, latitude: float, longitude
                                             datetime_or_doy=weather.index)["dni"]
     weather["dhi"] = - np.cos(np.radians(solar_position.zenith)) * weather.dni + weather.ghi
 
+    # TODO  cache this section by saving npy ies with coords and num panels as filename in cache dir
     sim_out = pv_system.run_model(weather).results
     results = pd.DataFrame({"power": sim_out.ac})
     # clip the power to zero, as negative power does not make sense?
@@ -107,6 +107,7 @@ def evaluate_system(
     Evaluate system performance (loss function) for given configuration parameters.
     """
     # TODO: double check that it is ok to just multiply the power with the number of solar panels
+    # might be some important non linearities with the inverter system
     rad: pd.Series = results.power  # hourly power values
     time_range: float = 1
     water_pumped: pd.Series = calculate_volume_water_pumped(
@@ -375,9 +376,6 @@ if __name__ == "__main__":
         logging.info(f"Masked {100*(1-len(lon_lat_pairs)/(len(longitudes)*len(latitudes)))}% of data points in {perf_counter()-start_mask}s.")
 
         best_configs = []
-        losses = []
-        costs = []
-        shortage_days = []
 
         logging.info("Starting global optimization")
         for longitude, latitude in tqdm(lon_lat_pairs):
@@ -398,10 +396,18 @@ if __name__ == "__main__":
             best_config_index = np.argmin(costs_arr[valid_pareto_indices])
             best_index = valid_pareto_indices[best_config_index]
             best_config = hyperparams[best_index]
-            best_configs.append(best_config)
-            losses.append(losses_arr[best_index])
-            costs.append(costs_arr[best_index])
 
+            best_config["longitude"] = longitude
+            best_config["latitude"] = latitude
+            best_config["loss"] = losses_arr[best_index]
+            best_config["cost"] = costs_arr[best_index]
+
+            location_ds = solar_radiation_ds.sel(lat=latitude, lon=longitude, method="nearest")
+            avg_solar_rad = float(location_ds.SWGDN.mean().values)
+            var_solar_rad = float(location_ds.SWGDN.var().values)
+            best_config["avg_solar_rad"] = avg_solar_rad
+            best_config["var_solar_rad"] = var_solar_rad
+            
             results_best, tank_capacity = simulate_at_location(
                 solar_radiation_ds=solar_radiation_ds, 
                 latitude=latitude, 
@@ -412,26 +418,33 @@ if __name__ == "__main__":
             volume_at_end_of_day = results_best[results_best.index.strftime('%H:%M') == "23:30"].water_in_tank
             volume_at_end_of_day = volume_at_end_of_day[:-1]
             num_shortage_days = (volume_at_end_of_day < SHORTAGE_THRESHOLD * tank_capacity).sum()
-            shortage_days.append(num_shortage_days)
+            best_config["shortage_days"] = num_shortage_days
+
+            shortage_hours = (results_best["water_in_tank"] < SHORTAGE_THRESHOLD * tank_capacity).sum()
+            best_config["shortage_hours"] = shortage_hours
+
+            best_config["avg_tank_volume"] = results_best["water_in_tank"].mean()
+            best_config["var_tank_volume"] = results_best["water_in_tank"].var()
+
+            best_configs.append(best_config)
 
         # Save results
-        best_configs_df = pd.DataFrame(best_configs)
-        best_configs_df["loss"] = losses
-        best_configs_df["cost"] = costs
-        best_configs_df["shortage_days"] = shortage_days
+        best_configs_df = pd.DataFrame(best_configs)    
         best_configs_df.to_csv(OUTPUT_DIR / "best_configs.csv")
         logger.info(f"Saved best configurations to {OUTPUT_DIR / 'best_configs.csv'}")
 
         plot_heatmap(
             lon_lat_pairs=lon_lat_pairs,
-            values=np.array(costs),
+            values=np.array([config["cost"] for config in best_configs]),
             output_file=OUTPUT_DIR / "best_config_costs.png",
             legend="Best Config Cost per community member (USD)",
             hue_style="green"
-        )
+        ) # TODO: the lack of diversity of best config suggests that 
+        # either the loss function is not sensitive enough or the range of hyperparameters too wide, not
+        # focused on the region of interest.
         plot_heatmap(
             lon_lat_pairs=lon_lat_pairs,
-            values=np.array(shortage_days),
+            values=np.array([config["shortage_days"] for config in best_configs]),
             output_file=OUTPUT_DIR / "best_config_shortage_days.png",
             legend="Best Config Number of days with water shortage",
             hue_style="red"
@@ -439,11 +452,18 @@ if __name__ == "__main__":
 
         # Analyse correlations 
         corr = best_configs_df.corr()
-        plt.figure(figsize=(10, 10))
+        plt.figure(figsize=(20,20), dpi=300) 
         sns.heatmap(corr, annot=True, cmap="coolwarm")
         plt.title("Correlation Matrix")
         plt.savefig(OUTPUT_DIR / "global_correlation_matrix_best_config.png")
 
+        # Plot distribution of best configs (solar panels, storage factor)
+        fig, axes = plt.subplots(1, 2, figsize=(16, 8))
+        sns.histplot(best_configs_df["number_solar_panels"], ax=axes[0])
+        sns.histplot(best_configs_df["storage_factor"], ax=axes[1])
+        axes[0].set_title("Distribution of best number of solar panels")
+        axes[1].set_title("Distribution of best storage factor")
+        plt.savefig(OUTPUT_DIR / "global_best_configs_distribution.png")
 
         # TODO: analyse this for all configs, not just the best ones    
 
