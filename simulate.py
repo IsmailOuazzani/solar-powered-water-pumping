@@ -20,6 +20,8 @@ from pathlib import Path
 import xarray as xr
 from argparse import ArgumentParser
 import calplot
+import pickle
+
 
 import logging
 import numpy as np
@@ -73,30 +75,47 @@ def simulate_at_location(
     results = simulate_water_tank(results, tank_capacity)
     return results, tank_capacity
 
+
 def run_pv_simulation(solar_radiation_ds: xr.Dataset, latitude: float, longitude: float):
     """
     Run the PV simulation for a given geographic coordinate.
-    Returns the simulation results DataFrame.
+    Returns the simulation results DataFrame and the weather DataFrame.
+    This function caches the results as a pickle file in the local "./tmp" directory.
+    Files are named as "{longitude}_{latitude}.pkl".
     """
-    #TODO: can this be cached?
 
-    # Select the data at the location
+    # Set up cache directory
+    cache_dir = Path("./tmp")
+    cache_dir.mkdir(exist_ok=True)
+    cache_file = cache_dir / f"{longitude}_{latitude}.pkl"
+
+    # If a cached file exists, load and return it.
+    if cache_file.exists():
+        with open(cache_file, "rb") as f:
+            results, weather = pickle.load(f)
+        return results, weather
+
+    # Otherwise, run the simulation.
     location_ds = solar_radiation_ds.sel(lat=latitude, lon=longitude, method="nearest")
     pv_system = make_pv_system(latitude=latitude, longitude=longitude)
     weather = location_ds.to_dataframe().rename(columns={"SWGDN": "ghi"})
 
-    # Get solar position and compute dni and dhi
+    # Get solar position and compute dni and dhi.
     solar_position = pvlib.solarposition.get_solarposition(location_ds.time, latitude, longitude)
-    weather["dni"] = pvlib.irradiance.disc(ghi=weather.ghi,
-                                            solar_zenith=solar_position.zenith,
-                                            datetime_or_doy=weather.index)["dni"]
+    weather["dni"] = pvlib.irradiance.disc(
+        ghi=weather.ghi,
+        solar_zenith=solar_position.zenith,
+        datetime_or_doy=weather.index
+    )["dni"]
     weather["dhi"] = - np.cos(np.radians(solar_position.zenith)) * weather.dni + weather.ghi
 
-    # TODO  cache this section by saving npy ies with coords and num panels as filename in cache dir
     sim_out = pv_system.run_model(weather).results
     results = pd.DataFrame({"power": sim_out.ac})
-    # clip the power to zero, as negative power does not make sense?
     results["power"] = results.power.clip(lower=0).fillna(0)
+
+    # Save the results and weather as a tuple using pickle.
+    with open(cache_file, "wb") as f:
+        pickle.dump((results, weather), f)
     return results, weather
 
 
@@ -248,7 +267,10 @@ if __name__ == "__main__":
         longitudes = solar_radiation_ds['lon'].values  
         latitudes = solar_radiation_ds['lat'].values 
         start_mask = perf_counter()
-        lon_lat_pairs = mask_lon_lat(longitudes,latitudes, country_name=COUNTRY, plot=False)
+        lon_lat_pairs = mask_lon_lat(longitudes,latitudes, 
+                                    #  continent="Africa", 
+                                    country_name=COUNTRY,
+                                     plot=False)
         logging.info(f"Masked {100*(1-len(lon_lat_pairs)/(len(longitudes)*len(latitudes)))}% of data points in {perf_counter()-start_mask}s.")
     
         pv_outputs = []
@@ -259,7 +281,7 @@ if __name__ == "__main__":
         final_water_levels_jan1 = [] # TODO: rename
         
         for longitude, latitude in tqdm(lon_lat_pairs):
-            logging.debug(f"Simulating system at {longitude}, {latitude}...")
+            logger.debug(f"Simulating system at {longitude}, {latitude}...")
             results, tank_capacity = simulate_at_location(
                 solar_radiation_ds=solar_radiation_ds, 
                 latitude=latitude, # TODO: change this to pass only location_ds
@@ -271,7 +293,7 @@ if __name__ == "__main__":
             pv_outputs.append(results)
             pv_outputs_sums.append(results.power.sum())
             final_water_levels_jan1.append(results.loc["2023-12-21 23:30:00", "water_in_tank"])
-
+            logger.debug(f"Evaluating loss function at {longitude}, {latitude}")
             loss = evaluate_system(
                 results=results, 
                 number_solar_panels=NUMBER_SOLAR_PANELS, 

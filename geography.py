@@ -4,6 +4,21 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from matplotlib import cm
+import geopandas as gpd
+import csv
+
+AFRICA_COUNTRIES = [
+                "Algeria", "Angola", "Benin", "Botswana", "Burkina Faso", "Burundi",
+                "Cabo Verde", "Cameroon", "Central African Rep.", "Chad", "Comoros",
+                "Dem. Rep. Congo", "Congo", "Côte d'Ivoire", "Djibouti", "Egypt",
+                "Eq. Guinea", "Eritrea", "Ethiopia", "Gabon", "Gambia", "Ghana",
+                "Guinea", "Guinea-Bissau", "Kenya", "Lesotho", "Liberia", "Libya",
+                "Madagascar", "Malawi", "Mali", "Mauritania", "Mauritius", "Morocco",
+                "Mozambique", "Namibia", "Niger", "Nigeria", "Rwanda", "São Tomé and Principe",
+                "Senegal", "Seychelles", "Sierra Leone", "Somalia", "Somaliland",
+                "South Africa", "S. Sudan", "Sudan", "Tanzania", "Togo", "Tunisia", "Uganda",
+                "Zambia", "Zimbabwe"
+            ]
 
 
 def heatmap_style_map(ax, title, extent=None):
@@ -54,18 +69,36 @@ def plot_heatmap(lon_lat_pairs: list[tuple[float]], values: np.ndarray, output_f
 
 
 
-def mask_lon_lat(lon: np.ndarray, lat: np.ndarray, country_name: str, plot: bool = True) -> list[tuple[float, float]]:
+def mask_lon_lat(lon: np.ndarray, lat: np.ndarray, country_name: str | None = None, continent: str | None = None, plot: bool = True) -> list[tuple[float, float]]:
     import regionmask
+
     countries = regionmask.defined_regions.natural_earth_v5_1_2.countries_50
 
-    # TODO: make this configurable
-    country_index = countries.map_keys(country_name)
-
-    lon_grid, lat_grid = np.meshgrid(lon, lat)
-    mask = countries.mask(lon_grid, lat_grid)
-    country_mask = mask == country_index
-    lon_within_mask = lon_grid[country_mask]
-    lat_within_mask = lat_grid[country_mask]
+    if country_name:
+        country_index = countries.map_keys(country_name)
+        lon_grid, lat_grid = np.meshgrid(lon, lat)
+        mask = countries.mask(lon_grid, lat_grid)
+        country_mask = mask == country_index
+        lon_within_mask = lon_grid[country_mask]
+        lat_within_mask = lat_grid[country_mask]
+    elif continent == "Africa":
+        countries_gdf = countries.to_geodataframe()
+        africa_gdf = countries_gdf[countries_gdf["names"].isin(AFRICA_COUNTRIES)]
+        africa_gdf.loc[africa_gdf["names"] == "Somaliland", "abbrevs"] = "SML" # Sierra Leone and Somaliland both have the same abbreviation as SL
+        africa_gdf.loc[africa_gdf["names"] == "Seychelles", "abbrevs"] = "SYC" # Seychelles and Sierra Leone both have the same abbreviation as SRB
+        africa_region = regionmask.Regions.from_geodataframe(africa_gdf, name="Africa")
+        lon_grid, lat_grid = np.meshgrid(lon, lat)
+        mask = africa_region.mask(lon_grid, lat_grid)
+        # For a union mask, gridpoints in Africa are non-NaN.
+        country_mask = ~np.isnan(mask)
+        lon_within_mask = lon_grid[country_mask]
+        lat_within_mask = lat_grid[country_mask]
+    elif country_name and continent:
+        raise ValueError("You must provide either a country_name or continent, not both.")
+    elif not country_name and not continent:
+        raise ValueError("You must provide either a country_name or continent.")
+    else: 
+        raise NotImplementedError("This combination of country_name and continent is not supported.")
 
 
     coordinates_masked = []
