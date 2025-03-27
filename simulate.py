@@ -118,17 +118,19 @@ def run_pv_simulation(solar_radiation_ds: xr.Dataset, latitude: float, longitude
         pickle.dump((results, weather), f)
     return results, weather
 
-
 def evaluate_system(
     results: pd.DataFrame, number_solar_panels: int, storage_factor: float
 ) -> float:
     """
     Evaluate system performance (loss function) for given configuration parameters.
+    
+    This version uses the vectorized simulate_water_tank function.
     """
     # TODO: double check that it is ok to just multiply the power with the number of solar panels
     # might be some important non linearities with the inverter system
-    rad: pd.Series = results.power  # hourly power values
+    rad: pd.Series = results.power
     time_range: float = 1
+
     water_pumped: pd.Series = calculate_volume_water_pumped(
         number_solar_panels,
         rad,
@@ -138,22 +140,22 @@ def evaluate_system(
         inverter_eff=INVERTER_EFFICIENCY,
         hydraulic_const=HYDRAULIC_CONSTANT
     )
-    water_demand: list[float] = [calculate_volume_water_demand(WATER_DEMAND_HOURLY, time_range)] * len(rad)
+
+    # Water demand is constant for each time step.
+    water_demand_value = calculate_volume_water_demand(WATER_DEMAND_HOURLY, time_range)
+    water_demand: pd.Series = pd.Series([water_demand_value] * len(rad), index=rad.index)
+
     tank_capacity: float = 24 * storage_factor * WATER_DEMAND_HOURLY
 
-    # TODO: replace this with simulate_water_tank function?
-    water_in_tank: list[float] = [tank_capacity]
-    water_deficit: list[float] = [0]
-    for i in range(1, len(rad)):
-        new_level: float = water_in_tank[-1] + water_pumped.iloc[i] - water_demand[i]
-        if new_level < 0:
-            water_deficit.append(abs(new_level))
-            constrained_level: float = 0
-        else:
-            constrained_level = min(new_level, tank_capacity)
-            water_deficit.append(0)
-        water_in_tank.append(constrained_level)
-    return lpsp_total(water_deficit, water_demand)
+    df = pd.DataFrame({
+        "water_pumped": water_pumped,
+        "water_demand": water_demand
+    }, index=rad.index)
+    df = simulate_water_tank(df, tank_capacity)
+
+    return lpsp_total(df["water_deficit"].values, water_demand.values)
+
+
 
 def run_optimisation(
     results: pd.DataFrame, panels_range: np.ndarray, storage_range: np.ndarray, target_loss: float | None = None
@@ -394,8 +396,8 @@ if __name__ == "__main__":
         lon_lat_pairs = mask_lon_lat(
             longitudes,
             latitudes, 
-            # country_name=COUNTRY, 
-            continent="Africa",
+            country_name=COUNTRY, 
+            # continent="Africa",
             plot=False)
         logging.info(f"Masked {100*(1-len(lon_lat_pairs)/(len(longitudes)*len(latitudes)))}% of data points in {perf_counter()-start_mask}s.")
 
