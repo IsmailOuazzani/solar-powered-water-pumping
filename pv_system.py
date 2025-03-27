@@ -4,7 +4,6 @@ import xarray as xr
 import pandas as pd
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
 
 COST_PER_PANEL = 330 # From Bouzidi paper  
 COST_POWER_INVERTER = 411

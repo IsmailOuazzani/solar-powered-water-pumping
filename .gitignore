@@ -177,3 +177,4 @@ datasets
 
 cache/*
 tmp/
+*.swp

@@ -17,7 +17,7 @@ AFRICA_COUNTRIES = [
                 "Mozambique", "Namibia", "Niger", "Nigeria", "Rwanda", "São Tomé and Principe",
                 "Senegal", "Seychelles", "Sierra Leone", "Somalia", "Somaliland",
                 "South Africa", "S. Sudan", "Sudan", "Tanzania", "Togo", "Tunisia", "Uganda",
-                "Zambia", "Zimbabwe"
+                "Zambia", "Zimbabwe", "W. Sahara"
             ]
 
 

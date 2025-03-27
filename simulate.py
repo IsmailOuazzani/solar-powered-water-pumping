@@ -26,7 +26,7 @@ import pickle
 import logging
 import numpy as np
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 
@@ -268,8 +268,8 @@ if __name__ == "__main__":
         latitudes = solar_radiation_ds['lat'].values 
         start_mask = perf_counter()
         lon_lat_pairs = mask_lon_lat(longitudes,latitudes, 
-                                    #  continent="Africa", 
-                                    country_name=COUNTRY,
+                                     continent="Africa", 
+                                    # country_name=COUNTRY,
                                      plot=False)
         logging.info(f"Masked {100*(1-len(lon_lat_pairs)/(len(longitudes)*len(latitudes)))}% of data points in {perf_counter()-start_mask}s.")
     
@@ -277,7 +277,6 @@ if __name__ == "__main__":
         pv_outputs_sums = []
         losses_total = []
         shortage_days = []
-        solar_radation_averages = []
         final_water_levels_jan1 = [] # TODO: rename
         
         for longitude, latitude in tqdm(lon_lat_pairs):
@@ -300,13 +299,11 @@ if __name__ == "__main__":
                 storage_factor=STORAGE_FACTOR)
             losses_total.append(loss)
 
+            logger.debug(f"Storing results for {longitude}, {latitude}")
             volume_at_end_of_day = results[results.index.strftime('%H:%M') == "23:30"].water_in_tank
             volume_at_end_of_day = volume_at_end_of_day[:-1] # TODO: fix datasets to not have this
             num_shortage_days = (volume_at_end_of_day < SHORTAGE_THRESHOLD * tank_capacity).sum()
             shortage_days.append(num_shortage_days)
-
-            average_solar_radiation = solar_radiation_ds.sel(lat=latitude, lon=longitude, method="nearest").SWGDN.mean().values
-            solar_radation_averages.append(average_solar_radiation)
 
         first_data_point_pv = pv_outputs[0]
         plot_water_simulation(first_data_point_pv, "2023-12-21", tank_capacity, "") # TODO:move this to local section
@@ -394,7 +391,12 @@ if __name__ == "__main__":
         start_mask = perf_counter()
         longitudes = solar_radiation_ds['lon'].values  
         latitudes = solar_radiation_ds['lat'].values 
-        lon_lat_pairs = mask_lon_lat(longitudes,latitudes, country_name=COUNTRY, plot=False)
+        lon_lat_pairs = mask_lon_lat(
+            longitudes,
+            latitudes, 
+            # country_name=COUNTRY, 
+            continent="Africa",
+            plot=False)
         logging.info(f"Masked {100*(1-len(lon_lat_pairs)/(len(longitudes)*len(latitudes)))}% of data points in {perf_counter()-start_mask}s.")
 
         best_configs = []
@@ -424,11 +426,12 @@ if __name__ == "__main__":
             best_config["loss"] = losses_arr[best_index]
             best_config["cost"] = costs_arr[best_index]
 
-            location_ds = solar_radiation_ds.sel(lat=latitude, lon=longitude, method="nearest")
-            avg_solar_rad = float(location_ds.SWGDN.mean().values)
-            var_solar_rad = float(location_ds.SWGDN.var().values)
-            best_config["avg_solar_rad"] = avg_solar_rad
-            best_config["var_solar_rad"] = var_solar_rad
+            # TODO: need to cache the following if we want to use it
+            # location_ds = solar_radiation_ds.sel(lat=latitude, lon=longitude, method="nearest")
+            # avg_solar_rad = float(location_ds.SWGDN.mean().values)
+            # var_solar_rad = float(location_ds.SWGDN.var().values)
+            # best_config["avg_solar_rad"] = avg_solar_rad
+            # best_config["var_solar_rad"] = var_solar_rad
             
             results_best, tank_capacity = simulate_at_location(
                 solar_radiation_ds=solar_radiation_ds, 

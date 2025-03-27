@@ -8,8 +8,6 @@ from tqdm import tqdm
 
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-
 
 DATASETS = {
     "M2T1NXRAD_5-2023_only_SWGDN": "datasets/M2T1NXRAD_5-2023_only_SWGDN.nc4"
