@@ -30,7 +30,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 
 
-COUNTRY="Sudan"
+COUNTRY="Morocco"
 OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -46,8 +46,12 @@ NUMBER_SOLAR_PANELS = 43  # optimal result in Bouzidi paper
 HYDRAULIC_CONSTANT = 2.725
 
 # Optimisation
-OPTIM_NUM_PANELS_RANGE = np.linspace(20, 100, 10)
-OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 2, 10) # TODO: it might become more intuitive to use storage volume instead of storage factor
+OPTIM_NUM_PANELS_RANGE = np.linspace(30, 150, 20)
+OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 3, 20) # TODO: it might become more intuitive to use storage volume instead of storage factor
+OPTIM_NUM_PANELS_RANGE = np.linspace(10, 150, 30)
+OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 2, 30) # TODO: it might become more intuitive to use storage volume instead of storage factor
+
+
 TARGET_LOSS = 0.0035
 SHORTAGE_THRESHOLD = 0.1 # 10% of tank volume
 
@@ -57,6 +61,7 @@ def simulate_at_location(
     solar_radiation_ds: xr.Dataset,
     num_panels: int,
     storage_factor: float,
+    initial_tank_level_frac: float
 ) -> tuple[pd.DataFrame, float]:
     """
     Simulate the PV and water system for a single location.
@@ -75,7 +80,7 @@ def simulate_at_location(
     results["water_demand"] = calculate_volume_water_demand(WATER_DEMAND_HOURLY, time_range=1)
 
     tank_capacity: float = 24 * storage_factor * WATER_DEMAND_HOURLY  # in m³
-    results = simulate_water_tank(results, tank_capacity)
+    results = simulate_water_tank(results, tank_capacity, initial_tank_level_frac)
     return results, tank_capacity
 
 
@@ -122,7 +127,7 @@ def run_pv_simulation(solar_radiation_ds: xr.Dataset, latitude: float, longitude
     return results, weather
 
 def evaluate_system(
-    results: pd.DataFrame, number_solar_panels: int, storage_factor: float
+    results: pd.DataFrame, number_solar_panels: int, storage_factor: float, initial_tank_level_frac: float
 ) -> float:
     """
     Evaluate system performance (loss function) for given configuration parameters.
@@ -154,14 +159,14 @@ def evaluate_system(
         "water_pumped": water_pumped,
         "water_demand": water_demand
     }, index=rad.index)
-    df = simulate_water_tank(df, tank_capacity)
+    df = simulate_water_tank(df, tank_capacity, initial_tank_level_frac) # TODO: this function appears to be called left and right
 
     return lpsp_total(df["water_deficit"].values, water_demand.values)
 
 
 
 def run_optimisation(
-    results: pd.DataFrame, panels_range: np.ndarray, storage_range: np.ndarray, target_loss: float | None = None
+    results: pd.DataFrame, panels_range: np.ndarray, storage_range: np.ndarray,initial_tank_level_frac: float, target_loss: float | None = None
 ) -> tuple[np.ndarray, np.ndarray, list[int], list[dict[str, float]]]:
     # TODO: only pass the power column to this to better separate concerns
     """
@@ -184,7 +189,7 @@ def run_optimisation(
     losses: list[float] = [] # TODO: group, with hyperparams, into a Config class
     costs: list[float] = []
     for config in tqdm(hyperparams, desc="Evaluating configurations"):
-        loss = evaluate_system(results, int(config["number_solar_panels"]), config["storage_factor"])
+        loss = evaluate_system(results, int(config["number_solar_panels"]), config["storage_factor"], initial_tank_level_frac)
         logger.debug(f"Config {config} -> loss: {loss}, cost: {cost}")
         losses.append(loss)
         costs.append(config["cost"])
@@ -291,7 +296,8 @@ if __name__ == "__main__":
                 latitude=latitude, # TODO: change this to pass only location_ds
                 longitude=longitude,
                 num_panels=NUMBER_SOLAR_PANELS,
-                storage_factor=STORAGE_FACTOR
+                storage_factor=STORAGE_FACTOR,
+                initial_tank_level_frac=1.0
             )
 
             pv_outputs.append(results)
@@ -301,7 +307,8 @@ if __name__ == "__main__":
             loss = evaluate_system(
                 results=results, 
                 number_solar_panels=NUMBER_SOLAR_PANELS, 
-                storage_factor=STORAGE_FACTOR)
+                storage_factor=STORAGE_FACTOR,
+                initial_tank_level_frac=1.0)
             losses_total.append(loss)
 
             logger.debug(f"Storing results for {longitude}, {latitude}")
@@ -338,24 +345,12 @@ if __name__ == "__main__":
         # Target location
         target_latitude = 27.8667
         target_longitude = -0.2833 
-        location_radiation_ds = solar_radiation_ds.sel(lat=target_latitude, lon=target_longitude, method='nearest')
-        pv_system = make_pv_system(latitude=target_latitude, longitude=target_longitude)
-        weather = location_radiation_ds.to_dataframe().rename(columns={"SWGDN": "ghi"}) # for compatibility with pvlib
-        solar_position = pvlib.solarposition.get_solarposition(location_radiation_ds.time, target_latitude, target_longitude)
-        weather["dni"] = pvlib.irradiance.disc(
-            ghi=weather.ghi, 
-            solar_zenith=solar_position.zenith, 
-            datetime_or_doy=weather.index)["dni"] #TODO: try other models for dni
-        weather["dhi"] =  - np.cos(np.radians(solar_position.zenith)) * weather.dni + weather.ghi # GHI = DHI + DNI * cos(zenith) https://www.researchgate.net/figure/Equation-of-calculating-GHI-using-DNI-and-DHI_fig1_362326479#:~:text=The%20quantity%20of%20solar%20radiation,)%20%2BDHI%20%5B12%5D%20.
-        logging.info(f"Simulating system at {target_longitude}, {target_latitude}...")
 
         start_simul = perf_counter()
-        sim_out = pv_system.run_model(weather).results
-        results = pd.DataFrame({"power":sim_out.ac})
-        results.power = results.power.clip(lower=0).fillna(0) 
-        logger.info(f"simulated pv system in {perf_counter()-start_simul}")
+        results, weather = run_pv_simulation(solar_radiation_ds, target_latitude, target_longitude)
+        logger.info(f"Simulated PV system at {target_longitude}, {target_latitude} in {perf_counter()-start_simul:.2f} seconds.")
         
-        losses, costs, pareto_indices, hyperparams = run_optimisation(results, OPTIM_NUM_PANELS_RANGE, OPTIM_NUM_STORAGE_FACTOR_RANGE)
+        losses, costs, pareto_indices, hyperparams = run_optimisation(results, OPTIM_NUM_PANELS_RANGE, OPTIM_NUM_STORAGE_FACTOR_RANGE, initial_tank_level_frac=1.0)
         plot_optimisation_results(
             panels_range=OPTIM_NUM_PANELS_RANGE, 
             storage_range=OPTIM_NUM_STORAGE_FACTOR_RANGE, 
@@ -363,7 +358,7 @@ if __name__ == "__main__":
             costs=costs, 
             pareto_indices=pareto_indices)
         
-        # ----------------- Analysis of best configuration at single location ----------------- #
+        # ----------------- Analysis of best configuration solution at single location ----------------- #
         # Best configuration is the cheapest one with a loss below the target
         # Filter the Pareto indices to those that meet the loss criteria
         valid_pareto_indices = [i for i in pareto_indices if losses[i] < TARGET_LOSS]
@@ -377,7 +372,8 @@ if __name__ == "__main__":
             latitude=target_latitude, 
             longitude=target_longitude,
             num_panels=best_config["number_solar_panels"],
-            storage_factor=best_config["storage_factor"]
+            storage_factor=best_config["storage_factor"],
+            initial_tank_level_frac=1.0
         )
         end_of_day_tank_capacity = results[results.index.strftime('%H:%M') == "23:30"].water_in_tank
         end_of_day_tank_capacity = end_of_day_tank_capacity[:-1] # TODO: fix datasets to not have this
@@ -387,9 +383,59 @@ if __name__ == "__main__":
                         cmap="RdYlBu",
                         colorbar=True)
         plt.savefig(OUTPUT_DIR / "water_in_tank_end_of_day.png")
+        plt.clf()
 
         num_shortage_days = (end_of_day_tank_capacity < SHORTAGE_THRESHOLD * tank_capacity).sum()
         logger.info(f"Number of days with water shortage: {num_shortage_days}")
+
+        # Analyse sensibility to initial condition in tank fullness level
+        initial_conditions = np.linspace(0.0, 1.0, 10)
+        shortage_days = []
+        shortage_hours = []
+        losses = []
+        for initial_condition in initial_conditions:
+            results, tank_capacity = simulate_at_location(
+                solar_radiation_ds=solar_radiation_ds, 
+                latitude=target_latitude, 
+                longitude=target_longitude,
+                num_panels=best_config["number_solar_panels"],
+                storage_factor=best_config["storage_factor"],
+                initial_tank_level_frac=initial_condition
+            )
+            volume_at_end_of_day = results[results.index.strftime('%H:%M') == "23:30"].water_in_tank
+            volume_at_end_of_day = volume_at_end_of_day[:-1]
+            num_shortage_days = (volume_at_end_of_day < SHORTAGE_THRESHOLD * tank_capacity).sum()
+            loss = evaluate_system(
+                results=results, 
+                number_solar_panels=best_config["number_solar_panels"], 
+                storage_factor=best_config["storage_factor"],
+                initial_tank_level_frac=initial_condition)
+            shortage_days.append(num_shortage_days)
+            shortage_hours.append((results["water_in_tank"] < SHORTAGE_THRESHOLD * tank_capacity).sum())
+            losses.append(loss)
+
+
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 12))
+        ax1.plot(initial_conditions, shortage_days, color='tab:blue', label="Shortage Days")
+        ax1.set_xlabel("Initial tank level fraction")
+        ax1.set_ylabel("Number of days with water shortage")
+        ax1.set_title("Shortage Days vs Initial Tank Level")
+        ax1.grid()
+        ax2.plot(initial_conditions, shortage_hours, color='tab:green', label="Shortage Hours")
+        ax2.set_xlabel("Initial tank level fraction")
+        ax2.set_ylabel("Number of hours with water shortage")
+        ax2.set_title("Shortage Hours vs Initial Tank Level")
+        ax2.grid()
+        ax3.plot(initial_conditions, losses, color='tab:red', label="Loss Function")
+        ax3.set_xlabel("Initial tank level fraction")
+        ax3.set_ylabel("Loss function (LPSP)")
+        ax3.set_title("Loss Function vs Initial Tank Level")
+        ax3.grid()
+
+        fig.tight_layout()
+        plt.savefig(OUTPUT_DIR / "sensitivity_initial_tank_level_combined.png")
+        plt.clf()
+
 
     # ----------------- Optimisation for all the points  ----------------- #
     if args.type == "global-optim":
@@ -399,8 +445,8 @@ if __name__ == "__main__":
         lon_lat_pairs = mask_lon_lat(
             longitudes,
             latitudes, 
-            country_name=COUNTRY, 
-            # continent="Africa",
+            # country_name=COUNTRY, 
+            continent="Africa",
             plot=False)
         logging.info(f"Masked {100*(1-len(lon_lat_pairs)/(len(longitudes)*len(latitudes)))}% of data points in {perf_counter()-start_mask}s.")
 
@@ -413,7 +459,8 @@ if __name__ == "__main__":
                 latitude=latitude, 
                 longitude=longitude,
                 num_panels=NUMBER_SOLAR_PANELS,
-                storage_factor=STORAGE_FACTOR
+                storage_factor=STORAGE_FACTOR,
+                initial_tank_level_frac=1.0
             )
             losses_arr, costs_arr, pareto_indices, hyperparams = run_optimisation(
                 results=results, 
@@ -443,7 +490,8 @@ if __name__ == "__main__":
                 latitude=latitude, 
                 longitude=longitude,
                 num_panels=best_config["number_solar_panels"],
-                storage_factor=best_config["storage_factor"]
+                storage_factor=best_config["storage_factor"],
+                initial_tank_level_frac=1.0
             )
             volume_at_end_of_day = results_best[results_best.index.strftime('%H:%M') == "23:30"].water_in_tank
             volume_at_end_of_day = volume_at_end_of_day[:-1]
@@ -496,10 +544,6 @@ if __name__ == "__main__":
         plt.savefig(OUTPUT_DIR / "global_best_configs_distribution.png")
 
         # TODO: analyse this for all configs, not just the best ones    
-
-
-
-
 
 
         

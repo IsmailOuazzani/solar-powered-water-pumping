@@ -31,7 +31,7 @@ def plot_water_simulation(results, time_range, tank_capacity, title):
     plt.close()
 
 @numba.njit
-def simulate_tank(u: np.ndarray, tank_capacity: float):
+def simulate_tank(u: np.ndarray, tank_capacity: float, initial_tank_level_frac: float) -> tuple[np.ndarray, np.ndarray]:
     """
     Vectorized water tank simulation compiled with Numba.
     Computes the water level and water deficit over time.
@@ -39,7 +39,7 @@ def simulate_tank(u: np.ndarray, tank_capacity: float):
     n = u.shape[0]
     water_in_tank = np.empty(n + 1)
     water_deficit = np.empty(n + 1)
-    water_in_tank[0] = tank_capacity
+    water_in_tank[0] = tank_capacity * initial_tank_level_frac
     water_deficit[0] = 0.0
     for i in range(n):
         new_level = water_in_tank[i] + u[i]
@@ -51,7 +51,7 @@ def simulate_tank(u: np.ndarray, tank_capacity: float):
             water_in_tank[i + 1] = new_level if new_level < tank_capacity else tank_capacity
     return water_in_tank, water_deficit
 
-def simulate_water_tank(results: pd.DataFrame, tank_capacity: float) -> pd.DataFrame:
+def simulate_water_tank(results: pd.DataFrame, tank_capacity: float, initial_tank_level_frac: float ) -> pd.DataFrame:
     """
     Simulate the water tank dynamics using a vectorized approach with Numba.
     Computes the water level and water deficit over time.
@@ -59,13 +59,14 @@ def simulate_water_tank(results: pd.DataFrame, tank_capacity: float) -> pd.DataF
     Parameters:
         results (pd.DataFrame): DataFrame with columns "water_pumped" and "water_demand".
         tank_capacity (float): Maximum capacity of the water tank (m³).
+        initial_tank_level_frac (float): Initial tank level as a fraction of the tank capacity.
     
     Returns:
         pd.DataFrame: Updated DataFrame with "water_in_tank" and "water_deficit" columns.
     """
     # Compute net water input (water pumped minus water demand)
     u = (results["water_pumped"] - results["water_demand"]).values
-    water_in_tank, water_deficit = simulate_tank(u, tank_capacity)
+    water_in_tank, water_deficit = simulate_tank(u, tank_capacity, initial_tank_level_frac)
     # Exclude the initial state to match the DataFrame length
     results["water_in_tank"] = water_in_tank[1:]
     results["water_deficit"] = water_deficit[1:]
