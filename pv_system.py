@@ -55,6 +55,7 @@ def appraise_system(number_solar_panels: int, tank_capacity: float) -> float:
     Factors in capital, replacement, and maintenance costs.
     """
     # TODO: take into account inflation
+    # TODO: rename this variable to LCC (life cycle cost) to be more consitent with the literature
 
     # Formulas from 10.1016/j.energy.2022.124048
     capital_cost = (

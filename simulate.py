@@ -30,7 +30,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 
 
-COUNTRY="Morocco"
+COUNTRY="Sudan"
 OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -48,7 +48,7 @@ HYDRAULIC_CONSTANT = 2.725
 # Optimisation
 OPTIM_NUM_PANELS_RANGE = np.linspace(20, 100, 10)
 OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 2, 10) # TODO: it might become more intuitive to use storage volume instead of storage factor
-TARGET_LOSS = 0.01
+TARGET_LOSS = 0.0035
 SHORTAGE_THRESHOLD = 0.1 # 10% of tank volume
 
 def simulate_at_location(
