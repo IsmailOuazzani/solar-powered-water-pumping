@@ -46,12 +46,8 @@ NUMBER_SOLAR_PANELS = 43  # optimal result in Bouzidi paper
 HYDRAULIC_CONSTANT = 2.725
 
 # Optimisation
-OPTIM_NUM_PANELS_RANGE = np.linspace(30, 150, 20)
-OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 3, 20) # TODO: it might become more intuitive to use storage volume instead of storage factor
-OPTIM_NUM_PANELS_RANGE = np.linspace(10, 150, 30)
-OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 2, 30) # TODO: it might become more intuitive to use storage volume instead of storage factor
-
-
+OPTIM_NUM_PANELS_RANGE = np.linspace(1, 100, 20)
+OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 2, 20) # TODO: it might become more intuitive to use storage volume instead of storage factor
 TARGET_LOSS = 0.0035
 SHORTAGE_THRESHOLD = 0.1 # 10% of tank volume
 
@@ -189,7 +185,11 @@ def run_optimisation(
     losses: list[float] = [] # TODO: group, with hyperparams, into a Config class
     costs: list[float] = []
     for config in tqdm(hyperparams, desc="Evaluating configurations"):
-        loss = evaluate_system(results, int(config["number_solar_panels"]), config["storage_factor"], initial_tank_level_frac)
+        loss = evaluate_system(
+            results=results, 
+            number_solar_panels=int(config["number_solar_panels"]), 
+            storage_factor=config["storage_factor"], 
+            initial_tank_level_frac=initial_tank_level_frac)
         logger.debug(f"Config {config} -> loss: {loss}, cost: {cost}")
         losses.append(loss)
         costs.append(config["cost"])
@@ -211,20 +211,40 @@ def run_optimisation(
             pareto_indices.append(i)
     return losses_arr, costs_arr, pareto_indices, hyperparams
 
+
+
 def plot_optimisation_results(
     panels_range: np.ndarray,
     storage_range: np.ndarray,
     losses: np.ndarray,
     costs: np.ndarray,
-    pareto_indices: list[int]
+    pareto_indices: list[int],
+    hyperparams: list[dict[str, float]]
 ) -> None:
     """
     Plot contour maps and the Pareto front for the optimisation.
+    
+    Although the hyperparams (and corresponding losses/costs arrays) are sorted by cost,
+    we reconstruct a 2D grid for contour plotting using the original panels and storage ranges.
     """
+    grid_losses = np.full((len(panels_range), len(storage_range)), np.nan)
+    grid_costs = np.full((len(panels_range), len(storage_range)), np.nan)
+    
+    # Reconstruct the grid based on the hyperparameters configuration.
+    # This is needed as the hyperparams are sorted by cost during the optimisation.
+    for k, config in enumerate(hyperparams):
+        panel_val = config["number_solar_panels"]
+        storage_val = config["storage_factor"]
+        # Find indices in the original arrays; use isclose to avoid floating point issues.
+        i = int(np.where(np.isclose(panels_range, panel_val))[0][0])
+        j = int(np.where(np.isclose(storage_range, storage_val))[0][0])
+        grid_losses[i, j] = losses[k]
+        grid_costs[i, j] = costs[k]
+    
     xs, ys = np.meshgrid(storage_range, panels_range, sparse=False)
 
-    # Plot loss contour
-    plt.contourf(xs, ys, losses.reshape(xs.shape))
+    # Plot loss contour using the grid array
+    plt.contourf(xs, ys, grid_losses)
     cb = plt.colorbar()
     cb.set_label("Loss (LPSP)")
     plt.xlabel("Storage Factor")
@@ -233,8 +253,8 @@ def plot_optimisation_results(
     plt.savefig(OUTPUT_DIR / "tradeoff_hourly.png")
     plt.clf()
 
-    # Plot cost contour
-    plt.contourf(xs, ys, costs.reshape(xs.shape))
+    # Plot cost contour using the grid array
+    plt.contourf(xs, ys, grid_costs)
     cb = plt.colorbar()
     cb.set_label("Cost per community member (USD)")
     plt.xlabel("Storage Factor")
@@ -243,7 +263,7 @@ def plot_optimisation_results(
     plt.savefig(OUTPUT_DIR / "cost_hourly.png")
     plt.clf()
 
-    # Plot Pareto front
+    # Plot Pareto front in the cost-loss space.
     plt.scatter(costs, losses, alpha=0.5, label="All configurations")
     pareto_costs: np.ndarray = costs[pareto_indices]
     pareto_losses: np.ndarray = losses[pareto_indices]
@@ -257,6 +277,7 @@ def plot_optimisation_results(
     plt.grid()
     plt.savefig(OUTPUT_DIR / "pareto_front_cost_vs_performance.png")
     plt.show()
+    plt.clf()
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -350,13 +371,15 @@ if __name__ == "__main__":
         results, weather = run_pv_simulation(solar_radiation_ds, target_latitude, target_longitude)
         logger.info(f"Simulated PV system at {target_longitude}, {target_latitude} in {perf_counter()-start_simul:.2f} seconds.")
         
-        losses, costs, pareto_indices, hyperparams = run_optimisation(results, OPTIM_NUM_PANELS_RANGE, OPTIM_NUM_STORAGE_FACTOR_RANGE, initial_tank_level_frac=1.0)
+        losses, costs, pareto_indices, hyperparams = run_optimisation(results, OPTIM_NUM_PANELS_RANGE, OPTIM_NUM_STORAGE_FACTOR_RANGE, initial_tank_level_frac=1.0, target_loss=None)
         plot_optimisation_results(
             panels_range=OPTIM_NUM_PANELS_RANGE, 
             storage_range=OPTIM_NUM_STORAGE_FACTOR_RANGE, 
             losses=losses, 
             costs=costs, 
-            pareto_indices=pareto_indices)
+            pareto_indices=pareto_indices,
+            hyperparams=hyperparams
+            )
         
         # ----------------- Analysis of best configuration solution at single location ----------------- #
         # Best configuration is the cheapest one with a loss below the target
