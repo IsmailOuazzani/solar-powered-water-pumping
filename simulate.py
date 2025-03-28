@@ -30,14 +30,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 
 
-COUNTRY="Algeria"
+COUNTRY="Morocco"
 OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 PUMPING_HEAD = 45  # meters, from Bouzidi paper
 PUMP_EFFICIENCY = 0.4 # from Bouzidi paper
 INVERTER_EFFICIENCY = 0.95 # from Bouzidi paper
-WATER_DEMAND_HOURLY = 60/24  # m³/hour, from Bouzidi paper
+WATER_DEMAND_DAILY = 60 # m³/hour, from Bouzidi paper
+WATER_DEMAND_HOURLY = WATER_DEMAND_DAILY/24 
+WATER_DEMAND_DAILY_PER_USER = 0.1 # m³/day TODO: justify
+NUM_USERS = WATER_DEMAND_DAILY / WATER_DEMAND_DAILY_PER_USER
 STORAGE_FACTOR = 0.65  # optimal result in the paper
 NUMBER_SOLAR_PANELS = 43  # optimal result in Bouzidi paper
 HYDRAULIC_CONSTANT = 2.725
@@ -171,7 +174,7 @@ def run_optimisation(
             cost = appraise_system(
                 number_solar_panels=int(num),
                 tank_capacity=24 * storage * WATER_DEMAND_HOURLY
-            )
+            ) / NUM_USERS
             hyperparams.append({
                 "number_solar_panels": float(num), 
                 "storage_factor": float(storage),

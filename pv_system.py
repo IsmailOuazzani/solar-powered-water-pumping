@@ -10,6 +10,18 @@ COST_POWER_INVERTER = 411
 COST_PUMP = 750
 COST_PER_M3_TANK = 285 # From Ahmed and Demirci paper
 
+# From Ahmed and Demirci paper
+LIFESPAN_SYSTEM = 20
+LIFESPAN_PUMP = 10
+LIFESPAN_TANK = 20
+LIFESPAN_INV = 20
+LIFESPAN_PANEL = 20
+
+# From Bouzidi paper
+MAINT_RATE_PANEL = 0.01   
+MAINT_RATE_PUMP_INVERTER = 0.01
+MAINT_RATE_TANK = 0.01 
+
 def make_pv_system(latitude: float, longitude: float) -> pvlib.modelchain.ModelChain:
     location = pvlib.location.Location(latitude=latitude, longitude=longitude)
     mount = pvlib.pvsystem.FixedMount(surface_tilt=latitude)
@@ -40,8 +52,28 @@ def make_pv_system(latitude: float, longitude: float) -> pvlib.modelchain.ModelC
 def appraise_system(number_solar_panels: int, tank_capacity: float) -> float:
     """
     Calculate a cost metric for the system configuration.
+    Factors in capital, replacement, and maintenance costs.
     """
-    cost = COST_POWER_INVERTER + COST_PUMP
-    cost += tank_capacity * COST_PER_M3_TANK
-    cost += number_solar_panels * COST_PER_PANEL
-    return cost / 400
+    # TODO: take into account inflation
+
+    # Formulas from 10.1016/j.energy.2022.124048
+    capital_cost = (
+        number_solar_panels*COST_PER_PANEL/LIFESPAN_PANEL +
+        COST_POWER_INVERTER/LIFESPAN_INV +
+        COST_PUMP/LIFESPAN_PUMP  +
+        tank_capacity*COST_PER_M3_TANK/LIFESPAN_TANK 
+    ) * LIFESPAN_SYSTEM
+
+    panel_maintenance_yearly = number_solar_panels * MAINT_RATE_PANEL * COST_PER_PANEL
+    pump_inverter_maintenance_yearly = (COST_POWER_INVERTER + COST_PUMP) * MAINT_RATE_PUMP_INVERTER
+    tank_maintenance_yearly = tank_capacity * COST_PER_M3_TANK * MAINT_RATE_TANK 
+
+    maintenance_cost = (
+        panel_maintenance_yearly +
+        pump_inverter_maintenance_yearly +
+        tank_maintenance_yearly
+    ) * LIFESPAN_SYSTEM
+
+    return capital_cost + maintenance_cost
+
+    
