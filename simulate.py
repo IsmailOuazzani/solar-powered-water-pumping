@@ -34,6 +34,8 @@ COUNTRY="Morocco"
 OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
+IPHONE_16_PRO_MAX_CAPACITY = 18 # Wh
+
 PUMPING_HEAD = 45  # meters, from Bouzidi paper
 PUMP_EFFICIENCY = 0.4 # from Bouzidi paper
 INVERTER_EFFICIENCY = 0.95 # from Bouzidi paper
@@ -46,8 +48,8 @@ NUMBER_SOLAR_PANELS = 43  # optimal result in Bouzidi paper
 HYDRAULIC_CONSTANT = 2.725
 
 # Optimisation
-OPTIM_NUM_PANELS_RANGE = np.linspace(1, 100, 20)
-OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 2, 20) # TODO: it might become more intuitive to use storage volume instead of storage factor
+OPTIM_NUM_PANELS_RANGE = np.linspace(10, 150, 15)
+OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 3, 15) # TODO: it might become more intuitive to use storage volume instead of storage factor
 TARGET_LOSS = 0.0035
 SHORTAGE_THRESHOLD = 0.1 # 10% of tank volume
 
@@ -162,7 +164,7 @@ def evaluate_system(
 
 
 def run_optimisation(
-    results: pd.DataFrame, panels_range: np.ndarray, storage_range: np.ndarray,initial_tank_level_frac: float, target_loss: float | None = None
+    results: pd.DataFrame, panels_range: np.ndarray, storage_range: np.ndarray,initial_tank_level_frac: float = 1.0, target_loss: float | None = None
 ) -> tuple[np.ndarray, np.ndarray, list[int], list[dict[str, float]]]:
     # TODO: only pass the power column to this to better separate concerns
     """
@@ -284,7 +286,7 @@ if __name__ == "__main__":
     parser.add_argument("--type", 
                         type=str, 
                         default="local", 
-                        choices={"local", "global", "global-optim"},
+                        choices={"local", "global", "global-optim", "background"},
                         help="Type of simulation to run")
     args = parser.parse_args()
 
@@ -568,5 +570,22 @@ if __name__ == "__main__":
 
         # TODO: analyse this for all configs, not just the best ones    
 
+    if args.type == "background":
+        # Plot the total SWGDN, cumulative summed over the year, for the entire world.
+        # Here we convert the sum from Wh/m² (assuming hourly values) to the number of iPhone 16 Pro Max devices that can be charged per m².
+        total_swgdn = solar_radiation_ds["SWGDN"].sum(dim="time")
+        total_swgdn_iphone_charges = total_swgdn / IPHONE_16_PRO_MAX_CAPACITY  # Convert from Wh/m² to number of iPhone charges
+        lons = total_swgdn.lon.values
+        lats = total_swgdn.lat.values
+        lon_grid, lat_grid = np.meshgrid(lons, lats)
+        values = total_swgdn_iphone_charges.values.flatten()
+        lon_lat_pairs = np.column_stack((lon_grid.flatten(), lat_grid.flatten()))
 
+        plot_heatmap(
+            lon_lat_pairs=lon_lat_pairs,
+            values=values,
+            output_file=OUTPUT_DIR / "total_swgdn_iphone_charges.png",
+            legend="Yearly iPhone 16 Pro Max Charges per m²",
+            hue_style="yellow"
+        )
         
