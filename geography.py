@@ -127,3 +127,18 @@ def mask_lon_lat(lon: np.ndarray, lat: np.ndarray, country_name: str | None = No
         plt.clf()
 
     return coordinates_masked
+
+
+def mask_landmass(lon: np.ndarray, lat: np.ndarray):
+    import regionmask
+    countries = regionmask.defined_regions.natural_earth_v5_1_2.land_50
+    
+    lon_grid, lat_grid = np.meshgrid(lon, lat)
+    mask = countries.mask(lon_grid, lat_grid)
+    land_mask = ~np.isnan(mask)    # shape (len(lat), len(lon))
+
+    lon_within_mask = lon_grid[land_mask]
+    lat_within_mask = lat_grid[land_mask]
+    coordinates_masked = list(zip(lon_within_mask, lat_within_mask))
+    return coordinates_masked, land_mask
+

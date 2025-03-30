@@ -6,7 +6,7 @@ Temperature: Celsius (unfortunate choice due to pvlib)
 Cost: USD
 """
 from data import import_merra2_dataset, DATASETS
-from geography import mask_lon_lat, plot_heatmap
+from geography import mask_lon_lat, plot_heatmap, mask_landmass
 from pv_system import make_pv_system, appraise_system
 from water_system import calculate_volume_water_pumped, calculate_volume_water_demand, simulate_water_tank, plot_water_simulation
 import pvlib
@@ -35,6 +35,7 @@ OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 IPHONE_16_PRO_MAX_CAPACITY = 18 # Wh
+SOLAR_PANEL_EFFICIENCY = 0.15 # Lower end, from internet
 
 PUMPING_HEAD = 45  # meters, from Bouzidi paper
 PUMP_EFFICIENCY = 0.4 # from Bouzidi paper
@@ -572,20 +573,22 @@ if __name__ == "__main__":
 
     if args.type == "background":
         # Plot the total SWGDN, cumulative summed over the year, for the entire world.
-        # Here we convert the sum from Wh/m² (assuming hourly values) to the number of iPhone 16 Pro Max devices that can be charged per m².
+        # Convert Wh/m² (assuming hourly values) to the number of iPhone 16 Pro Max charges per m².
         total_swgdn = solar_radiation_ds["SWGDN"].sum(dim="time")
-        total_swgdn_iphone_charges = total_swgdn / IPHONE_16_PRO_MAX_CAPACITY  # Convert from Wh/m² to number of iPhone charges
-        lons = total_swgdn.lon.values
-        lats = total_swgdn.lat.values
-        lon_grid, lat_grid = np.meshgrid(lons, lats)
-        values = total_swgdn_iphone_charges.values.flatten()
-        lon_lat_pairs = np.column_stack((lon_grid.flatten(), lat_grid.flatten()))
+        total_swgdn_iphone_charges = total_swgdn / IPHONE_16_PRO_MAX_CAPACITY
+        total_swgdn_iphone_charges = total_swgdn_iphone_charges * SOLAR_PANEL_EFFICIENCY
 
+        lon_lat_pairs, land_mask = mask_landmass(
+            lon=solar_radiation_ds.lon.values,
+            lat=solar_radiation_ds.lat.values
+        )
+        land_values = total_swgdn_iphone_charges.values[land_mask]  
         plot_heatmap(
             lon_lat_pairs=lon_lat_pairs,
-            values=values,
+            values=land_values,
             output_file=OUTPUT_DIR / "total_swgdn_iphone_charges.png",
             legend="Yearly iPhone 16 Pro Max Charges per m²",
-            hue_style="yellow"
+            hue_style="orange"
         )
+
         
