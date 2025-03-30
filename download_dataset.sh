@@ -7,5 +7,5 @@ output_dir="/home/ismail/code/solar-powered-water-pumping/datasets/M2T1NXRAD_5-2
 
 mkdir ${output_dir}
 
-cat ${list_path} | tr -d '\r' | xargs -n 1 -P 30 -I {} \
+cat ${list_path} | tr -d '\r' | xargs -n 1 -P 1 -I {} \
   curl -LJO -H "Authorization: bearer ${token}" --output-dir "${output_dir}" "{}"

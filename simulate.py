@@ -30,11 +30,13 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 
 
+# TODO: move quite a few of these variables to argparse
 COUNTRY="Morocco"
 OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
+PATTERN="constant"
 
-IPHONE_16_PRO_MAX_CAPACITY = 18 # Wh
+IPHONE_16_PRO_MAX_CAPACITY = 18 # Wh https://www.macworld.com/article/678413/iphone-battery-capacities-compared-all-iphones-battery-life-in-mah-and-wh.html
 
 PUMPING_HEAD = 45  # meters, from Bouzidi paper
 PUMP_EFFICIENCY = 0.4 # from Bouzidi paper
@@ -48,18 +50,19 @@ NUMBER_SOLAR_PANELS = 43  # optimal result in Bouzidi paper
 HYDRAULIC_CONSTANT = 2.725
 
 # Optimisation
-OPTIM_NUM_PANELS_RANGE = np.linspace(10, 150, 15)
-OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 3, 15) # TODO: it might become more intuitive to use storage volume instead of storage factor
+OPTIM_NUM_PANELS_RANGE = np.linspace(1, 100, 20)
+OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 2, 20) # TODO: it might become more intuitive to use storage volume instead of storage factor
 TARGET_LOSS = 0.0035
 SHORTAGE_THRESHOLD = 0.1 # 10% of tank volume
 
-def simulate_at_location(
+def simulate_at_location( # TODO: return only power series ...
     longitude: float,
     latitude: float,
     solar_radiation_ds: xr.Dataset,
     num_panels: int,
     storage_factor: float,
-    initial_tank_level_frac: float
+    initial_tank_level_frac: float,
+    pattern: str
 ) -> tuple[pd.DataFrame, float]:
     """
     Simulate the PV and water system for a single location.
@@ -75,7 +78,11 @@ def simulate_at_location(
         inverter_eff=INVERTER_EFFICIENCY,
         hydraulic_const=HYDRAULIC_CONSTANT
     )
-    results["water_demand"] = calculate_volume_water_demand(WATER_DEMAND_HOURLY, time_range=1)
+    results["water_demand"] = calculate_volume_water_demand(
+        baseline_daily_need = WATER_DEMAND_DAILY,
+        time_range_index=results.index,
+        pattern=pattern
+    )
 
     tank_capacity: float = 24 * storage_factor * WATER_DEMAND_HOURLY  # in m³
     results = simulate_water_tank(results, tank_capacity, initial_tank_level_frac)
@@ -125,7 +132,11 @@ def run_pv_simulation(solar_radiation_ds: xr.Dataset, latitude: float, longitude
     return results, weather
 
 def evaluate_system(
-    results: pd.DataFrame, number_solar_panels: int, storage_factor: float, initial_tank_level_frac: float
+    results: pd.DataFrame, 
+    number_solar_panels: int, 
+    storage_factor: float, 
+    initial_tank_level_frac: float,
+    pattern: str,
 ) -> float:
     """
     Evaluate system performance (loss function) for given configuration parameters.
@@ -135,7 +146,7 @@ def evaluate_system(
     # TODO: double check that it is ok to just multiply the power with the number of solar panels
     # might be some important non linearities with the inverter system
     rad: pd.Series = results.power
-    time_range: float = 1
+    time_range: float = 1 # TODO: get rid of this ugly time range logic
 
     water_pumped: pd.Series = calculate_volume_water_pumped(
         number_solar_panels,
@@ -147,19 +158,18 @@ def evaluate_system(
         hydraulic_const=HYDRAULIC_CONSTANT
     )
 
-    # Water demand is constant for each time step.
-    water_demand_value = calculate_volume_water_demand(WATER_DEMAND_HOURLY, time_range)
-    water_demand: pd.Series = pd.Series([water_demand_value] * len(rad), index=rad.index)
-
-    tank_capacity: float = 24 * storage_factor * WATER_DEMAND_HOURLY
+    tank_capacity = storage_factor * WATER_DEMAND_DAILY
 
     df = pd.DataFrame({
         "water_pumped": water_pumped,
-        "water_demand": water_demand
+        "water_demand": calculate_volume_water_demand(
+            baseline_daily_need=WATER_DEMAND_DAILY, 
+            time_range_index=rad.index,
+            pattern=pattern),
     }, index=rad.index)
     df = simulate_water_tank(df, tank_capacity, initial_tank_level_frac) # TODO: this function appears to be called left and right
 
-    return lpsp_total(df["water_deficit"].values, water_demand.values)
+    return lpsp_total(df["water_deficit"].values, df["water_demand"].values)
 
 
 
@@ -191,7 +201,8 @@ def run_optimisation(
             results=results, 
             number_solar_panels=int(config["number_solar_panels"]), 
             storage_factor=config["storage_factor"], 
-            initial_tank_level_frac=initial_tank_level_frac)
+            initial_tank_level_frac=initial_tank_level_frac,
+            pattern=PATTERN)
         logger.debug(f"Config {config} -> loss: {loss}, cost: {cost}")
         losses.append(loss)
         costs.append(config["cost"])
@@ -301,8 +312,8 @@ if __name__ == "__main__":
         latitudes = solar_radiation_ds['lat'].values 
         start_mask = perf_counter()
         lon_lat_pairs = mask_lon_lat(longitudes,latitudes, 
-                                     continent="Africa", 
-                                    # country_name=COUNTRY,
+                                    #  continent="Africa", 
+                                    country_name=COUNTRY,
                                      plot=False)
         logging.info(f"Masked {100*(1-len(lon_lat_pairs)/(len(longitudes)*len(latitudes)))}% of data points in {perf_counter()-start_mask}s.")
     
@@ -320,7 +331,8 @@ if __name__ == "__main__":
                 longitude=longitude,
                 num_panels=NUMBER_SOLAR_PANELS,
                 storage_factor=STORAGE_FACTOR,
-                initial_tank_level_frac=1.0
+                initial_tank_level_frac=1.0,
+                pattern=PATTERN,
             )
 
             pv_outputs.append(results)
@@ -331,7 +343,8 @@ if __name__ == "__main__":
                 results=results, 
                 number_solar_panels=NUMBER_SOLAR_PANELS, 
                 storage_factor=STORAGE_FACTOR,
-                initial_tank_level_frac=1.0)
+                initial_tank_level_frac=1.0,
+                pattern=PATTERN)
             losses_total.append(loss)
 
             logger.debug(f"Storing results for {longitude}, {latitude}")
@@ -341,6 +354,10 @@ if __name__ == "__main__":
             shortage_days.append(num_shortage_days)
 
         first_data_point_pv = pv_outputs[0]
+
+        # Print the water demand from the first 24 hours of the first data point
+        first_24_hours_water_demand = first_data_point_pv["water_demand"].iloc[:24]
+
         plot_water_simulation(first_data_point_pv, "2023-12-21", tank_capacity, "") # TODO:move this to local section
         plot_heatmap(lon_lat_pairs=lon_lat_pairs, 
                     values=np.array(pv_outputs_sums), 
@@ -398,7 +415,8 @@ if __name__ == "__main__":
             longitude=target_longitude,
             num_panels=best_config["number_solar_panels"],
             storage_factor=best_config["storage_factor"],
-            initial_tank_level_frac=1.0
+            initial_tank_level_frac=1.0,
+            pattern=PATTERN
         )
         end_of_day_tank_capacity = results[results.index.strftime('%H:%M') == "23:30"].water_in_tank
         end_of_day_tank_capacity = end_of_day_tank_capacity[:-1] # TODO: fix datasets to not have this
@@ -425,7 +443,8 @@ if __name__ == "__main__":
                 longitude=target_longitude,
                 num_panels=best_config["number_solar_panels"],
                 storage_factor=best_config["storage_factor"],
-                initial_tank_level_frac=initial_condition
+                initial_tank_level_frac=initial_condition,
+                pattern=PATTERN
             )
             volume_at_end_of_day = results[results.index.strftime('%H:%M') == "23:30"].water_in_tank
             volume_at_end_of_day = volume_at_end_of_day[:-1]
@@ -434,7 +453,8 @@ if __name__ == "__main__":
                 results=results, 
                 number_solar_panels=best_config["number_solar_panels"], 
                 storage_factor=best_config["storage_factor"],
-                initial_tank_level_frac=initial_condition)
+                initial_tank_level_frac=initial_condition,
+                pattern=PATTERN)
             shortage_days.append(num_shortage_days)
             shortage_hours.append((results["water_in_tank"] < SHORTAGE_THRESHOLD * tank_capacity).sum())
             losses.append(loss)
@@ -470,8 +490,8 @@ if __name__ == "__main__":
         lon_lat_pairs = mask_lon_lat(
             longitudes,
             latitudes, 
-            # country_name=COUNTRY, 
-            continent="Africa",
+            country_name=COUNTRY, 
+            # continent="Africa",
             plot=False)
         logging.info(f"Masked {100*(1-len(lon_lat_pairs)/(len(longitudes)*len(latitudes)))}% of data points in {perf_counter()-start_mask}s.")
 
@@ -485,7 +505,8 @@ if __name__ == "__main__":
                 longitude=longitude,
                 num_panels=NUMBER_SOLAR_PANELS,
                 storage_factor=STORAGE_FACTOR,
-                initial_tank_level_frac=1.0
+                initial_tank_level_frac=1.0,
+                pattern=PATTERN
             )
             losses_arr, costs_arr, pareto_indices, hyperparams = run_optimisation(
                 results=results, 
@@ -516,7 +537,8 @@ if __name__ == "__main__":
                 longitude=longitude,
                 num_panels=best_config["number_solar_panels"],
                 storage_factor=best_config["storage_factor"],
-                initial_tank_level_frac=1.0
+                initial_tank_level_frac=1.0,
+                pattern=PATTERN
             )
             volume_at_end_of_day = results_best[results_best.index.strftime('%H:%M') == "23:30"].water_in_tank
             volume_at_end_of_day = volume_at_end_of_day[:-1]
