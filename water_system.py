@@ -34,20 +34,76 @@ def calculate_volume_water_demand(baseline_daily_need: float, time_range_index: 
 
     return demand_series
 
-def plot_water_simulation(results, time_range, tank_capacity, title): # TODO: use this plot for slides on demand
+def plot_water_simulation(results, time_range, tank_capacity, title, show_percentage=True):
     """
-    Plot water simulation for a specified time range.
+    Plot water simulation for a specified time range with improved clarity for publication.
+    
+    Parameters:
+      - results: DataFrame with a datetime index and columns:
+          "water_pumped" (m³ per hour),
+          "water_demand" (m³ per hour),
+          "water_in_tank" (m³).
+      - time_range: A slice or indexer for the time period to plot.
+      - tank_capacity: The capacity of the tank (in m³).
+      - title: Title of the plot.
+      - show_percentage: Boolean flag. If True, display all values as percentages of tank capacity.
+    
+    In non-percentage mode, the figure is split into two subplots:
+      * The top subplot shows the flow data (water pumped and water demand).
+      * The bottom subplot shows the volume in tank and the tank capacity.
     """
-    results.loc[time_range, "water_pumped"].plot()
-    results.loc[time_range, "water_demand"].plot()
-    results.loc[time_range, "water_in_tank"].plot()
-
-    plt.axhline(y=tank_capacity, color='r', linestyle='--', label="Tank capacity")
-    plt.legend(["Water pumped", "Water Demand", "Water in tank", "Tank capacity"])
-    plt.title(title)
-    plt.ylabel("Water (m³)")
-    plt.savefig(f"outputs/water_in_tank_{time_range}.png")
-    plt.close()
+    
+    # Extract data for the specified time range.
+    data = results.loc[time_range]
+    
+    if show_percentage:
+        # Convert values to percentages of tank capacity.
+        water_pumped_pct = data["water_pumped"] / tank_capacity * 100
+        water_demand_pct = data["water_demand"] / tank_capacity * 100
+        water_in_tank_pct = data["water_in_tank"] / tank_capacity * 100
+        
+        # Create a single-axis plot for percentage mode.
+        fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
+        
+        ax.plot(data.index, water_pumped_pct, label="Water pumped (% of capacity)", linewidth=2, color="blue")
+        ax.plot(data.index, water_demand_pct, label="Water demand (% of capacity)", linewidth=2, color="orange")
+        ax.plot(data.index, water_in_tank_pct, label="Water in tank (% of capacity)", linewidth=2, color="green")
+        ax.axhline(y=100, color='red', linestyle='--', linewidth=2, label="Tank capacity (100%)")
+        
+        ax.set_xlabel("Time", fontsize=12)
+        ax.set_ylabel("Percentage (%)", fontsize=12)
+        ax.tick_params(axis='both', labelsize=10)
+        ax.legend(loc="upper left", fontsize=10)
+        ax.set_title(title, fontsize=14)
+        ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+        
+        fig.tight_layout()
+        plt.savefig(f"outputs/water_in_tank_{time_range}_percentage.png")
+        plt.close(fig)
+        
+    else:
+        # Create two subplots: one for flow data and one for tank volume.
+        fig, (ax_flow, ax_vol) = plt.subplots(2, 1, figsize=(10, 8), dpi=300, sharex=True)
+        
+        # Top subplot: Flow data (water pumped and water demand).
+        ax_flow.plot(data.index, data["water_pumped"], label="Water pumped (m³/h)", linewidth=2, color="blue")
+        ax_flow.plot(data.index, data["water_demand"], label="Water demand (m³/h)", linewidth=2, color="orange")
+        ax_flow.set_ylabel("Flow (m³/h)", fontsize=12)
+        ax_flow.legend(loc="upper left", fontsize=10)
+        ax_flow.grid(True, which='both', linestyle='--', linewidth=0.5)
+        
+        # Bottom subplot: Tank volume (water in tank) and tank capacity.
+        ax_vol.plot(data.index, data["water_in_tank"], label="Water in tank (m³)", linewidth=2, color="green")
+        ax_vol.axhline(y=tank_capacity, color='red', linestyle='--', linewidth=2, label="Tank capacity (m³)")
+        ax_vol.set_xlabel("Time", fontsize=12)
+        ax_vol.set_ylabel("Volume (m³)", fontsize=12)
+        ax_vol.legend(loc="upper left", fontsize=10)
+        ax_vol.grid(True, which='both', linestyle='--', linewidth=0.5)
+        
+        fig.suptitle(title, fontsize=14)
+        fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+        plt.savefig(f"outputs/water_in_tank_{time_range}.png")
+        plt.close(fig)
 
 @numba.njit
 def simulate_tank(u: np.ndarray, tank_capacity: float, initial_tank_level_frac: float) -> tuple[np.ndarray, np.ndarray]:

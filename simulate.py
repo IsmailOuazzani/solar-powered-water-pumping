@@ -56,6 +56,12 @@ OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 3, 20) # TODO: it might becom
 TARGET_LOSS = 0.0035
 SHORTAGE_THRESHOLD = 0.1 # 10% of tank volume
 
+
+logger.info(f"Config space number of panels: {OPTIM_NUM_PANELS_RANGE}")
+logger.info(f"Config space storage factor: {OPTIM_NUM_STORAGE_FACTOR_RANGE}")
+
+logger.info(f"Number users: {NUM_USERS} for a daily demand of {WATER_DEMAND_DAILY} m³/day")
+
 def simulate_at_location( # TODO: return only power series ...
     longitude: float,
     latitude: float,
@@ -619,6 +625,15 @@ if __name__ == "__main__":
             legend="Yearly iPhone 16 Pro Max Charges per m²",
             hue_style="orange"
         )
+
+        plt.figure(figsize=(10, 6))
+        plt.hist(total_swgdn.values.flatten(), bins=50, color='skyblue', edgecolor='black')
+        plt.title("Histogram of Total SWGDN (Yearly Cumulative)")
+        plt.xlabel("Total SWGDN (Wh/m²)")
+        plt.ylabel("Frequency")
+        plt.grid(axis='y', alpha=0.75)
+        plt.savefig(OUTPUT_DIR / "total_swgdn_histogram.png")
+        plt.clf()
 
     if args.type == "demand":
         # For a single location, compare the diurnal and constant demand patterns.
