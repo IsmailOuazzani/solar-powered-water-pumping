@@ -34,7 +34,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 COUNTRY="Morocco"
 OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
-PATTERN="constant"
+PATTERN="diurnal"
 
 IPHONE_16_PRO_MAX_CAPACITY = 18 # Wh
 SOLAR_PANEL_EFFICIENCY = 0.15 # Lower end, from internet
@@ -51,8 +51,8 @@ NUMBER_SOLAR_PANELS = 43  # optimal result in Bouzidi paper
 HYDRAULIC_CONSTANT = 2.725
 
 # Optimisation
-OPTIM_NUM_PANELS_RANGE = np.linspace(1, 100, 20)
-OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 2, 20) # TODO: it might become more intuitive to use storage volume instead of storage factor
+OPTIM_NUM_PANELS_RANGE = np.linspace(1, 150, 20)
+OPTIM_NUM_STORAGE_FACTOR_RANGE = np.linspace(0.01, 3, 20) # TODO: it might become more intuitive to use storage volume instead of storage factor
 TARGET_LOSS = 0.0035
 SHORTAGE_THRESHOLD = 0.1 # 10% of tank volume
 
@@ -175,7 +175,12 @@ def evaluate_system(
 
 
 def run_optimisation(
-    results: pd.DataFrame, panels_range: np.ndarray, storage_range: np.ndarray,initial_tank_level_frac: float = 1.0, target_loss: float | None = None
+    results: pd.DataFrame, 
+    panels_range: np.ndarray, 
+    storage_range: np.ndarray,
+    pattern: str,
+    initial_tank_level_frac: float = 1.0, 
+    target_loss: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, list[int], list[dict[str, float]]]:
     # TODO: only pass the power column to this to better separate concerns
     """
@@ -203,7 +208,7 @@ def run_optimisation(
             number_solar_panels=int(config["number_solar_panels"]), 
             storage_factor=config["storage_factor"], 
             initial_tank_level_frac=initial_tank_level_frac,
-            pattern=PATTERN)
+            pattern=pattern)
         logger.debug(f"Config {config} -> loss: {loss}, cost: {cost}")
         losses.append(loss)
         costs.append(config["cost"])
@@ -298,7 +303,7 @@ if __name__ == "__main__":
     parser.add_argument("--type", 
                         type=str, 
                         default="local", 
-                        choices={"local", "global", "global-optim", "background"},
+                        choices={"local", "global", "global-optim", "background", "demand"},
                         help="Type of simulation to run")
     args = parser.parse_args()
 
@@ -398,7 +403,8 @@ if __name__ == "__main__":
             losses=losses, 
             costs=costs, 
             pareto_indices=pareto_indices,
-            hyperparams=hyperparams
+            hyperparams=hyperparams,
+            pattern=PATTERN
             )
         
         # ----------------- Analysis of best configuration solution at single location ----------------- #
@@ -491,8 +497,8 @@ if __name__ == "__main__":
         lon_lat_pairs = mask_lon_lat(
             longitudes,
             latitudes, 
-            country_name=COUNTRY, 
-            # continent="Africa",
+            # country_name=COUNTRY, 
+            continent="Africa",
             plot=False)
         logging.info(f"Masked {100*(1-len(lon_lat_pairs)/(len(longitudes)*len(latitudes)))}% of data points in {perf_counter()-start_mask}s.")
 
@@ -513,7 +519,8 @@ if __name__ == "__main__":
                 results=results, 
                 panels_range=OPTIM_NUM_PANELS_RANGE, 
                 storage_range=OPTIM_NUM_STORAGE_FACTOR_RANGE,
-                target_loss=TARGET_LOSS
+                target_loss=TARGET_LOSS,
+                pattern=PATTERN
             )
             valid_pareto_indices = [i for i in pareto_indices if losses_arr[i] < TARGET_LOSS]
             best_config_index = np.argmin(costs_arr[valid_pareto_indices])
@@ -524,6 +531,7 @@ if __name__ == "__main__":
             best_config["latitude"] = latitude
             best_config["loss"] = losses_arr[best_index]
             best_config["cost"] = costs_arr[best_index]
+            best_config["pattern"] = PATTERN
 
             # TODO: need to cache the following if we want to use it
             # location_ds = solar_radiation_ds.sel(lat=latitude, lon=longitude, method="nearest")
@@ -556,8 +564,7 @@ if __name__ == "__main__":
 
         # Save results
         best_configs_df = pd.DataFrame(best_configs)    
-        best_configs_df.to_csv(OUTPUT_DIR / "best_configs.csv")
-        logger.info(f"Saved best configurations to {OUTPUT_DIR / 'best_configs.csv'}")
+        best_configs_df.to_csv(OUTPUT_DIR / f"best_configs_{PATTERN}_.csv")
 
         plot_heatmap(
             lon_lat_pairs=lon_lat_pairs,
@@ -612,5 +619,47 @@ if __name__ == "__main__":
             legend="Yearly iPhone 16 Pro Max Charges per m²",
             hue_style="orange"
         )
+
+    if args.type == "demand":
+        # For a single location, compare the diurnal and constant demand patterns.
+        latitude = 27.8667
+        longitude = -0.2833
+
+        results, tank_capacity = simulate_at_location(
+            solar_radiation_ds=solar_radiation_ds, 
+            latitude=latitude, 
+            longitude=longitude,
+            num_panels=NUMBER_SOLAR_PANELS,
+            storage_factor=STORAGE_FACTOR,
+            initial_tank_level_frac=1.0,
+            pattern="constant"
+        )
+        losses_cte, costs_cte, pareto_indices_cte, hyperparams_cte = run_optimisation(
+            results=results, 
+            panels_range=OPTIM_NUM_PANELS_RANGE, 
+            storage_range=OPTIM_NUM_STORAGE_FACTOR_RANGE,
+            target_loss=TARGET_LOSS,
+            pattern="constant"
+        )
+        losses_diurnal, costs_diurnal, pareto_indices_diurnal, hyperparams_diurnal = run_optimisation(
+            results=results, 
+            panels_range=OPTIM_NUM_PANELS_RANGE, 
+            storage_range=OPTIM_NUM_STORAGE_FACTOR_RANGE,
+            target_loss=TARGET_LOSS,
+            pattern="diurnal"
+        )
+        # Compare the Pareto fronts
+        plt.scatter(costs_cte, losses_cte, label="Constant Demand", marker="o")
+        plt.scatter(costs_diurnal, losses_diurnal, label="Diurnal Demand", marker="x")
+        plt.xlabel("Cost per community member (USD)")
+        plt.ylabel("Loss of Power Supply Probability (LPSP)")
+        plt.title("Pareto Front Comparison")
+        plt.legend()
+        plt.grid()
+        plt.savefig(OUTPUT_DIR / "pareto_front_comparison.png")        
+        
+        
+
+        
 
         
