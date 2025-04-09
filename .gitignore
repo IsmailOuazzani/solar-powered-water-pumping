@@ -181,3 +181,5 @@ tmp/
 *.swp
 
 presentation.py
+thesis.py
+diesel.py

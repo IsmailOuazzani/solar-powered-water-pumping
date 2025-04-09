@@ -67,6 +67,158 @@ def plot_heatmap(lon_lat_pairs: list[tuple[float]], values: np.ndarray, output_f
     plt.savefig(output_file, dpi=300)
     plt.clf()
 
+def plot_heatmap_binary(lon_lat_pairs: list[tuple[float, float]], 
+                          bool_values, 
+                          output_file: str, 
+                          legend_true: str = "True", 
+                          legend_false: str = "False", 
+                          color_true: str = "blue", 
+                          color_false: str = "red"):
+    """
+    Plots a binary heatmap on a map projection using given longitude-latitude pairs and a corresponding 
+    array of boolean values. Points with True values are plotted in color_true and points with 
+    False values in color_false. A legend is added to indicate the mapping.
+    
+    Parameters:
+        lon_lat_pairs (list of tuple[float, float]): A list of (lon, lat) coordinate pairs.
+        bool_values (list or np.ndarray): A boolean array (or list) with True/False values corresponding
+                                          to each coordinate pair.
+        output_file (str): The path to save the output plot.
+        legend_true (str): Label for points where the value is True. Default is "True".
+        legend_false (str): Label for points where the value is False. Default is "False".
+        color_true (str): Color for points with True values. Default is "blue".
+        color_false (str): Color for points with False values. Default is "red".
+    """
+    import matplotlib.pyplot as plt
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
+    
+    # Basic check that coordinate and boolean data have matching lengths
+    if len(lon_lat_pairs) != len(bool_values):
+        raise ValueError("Length of lon_lat_pairs must equal the length of bool_values.")
+    
+    # Separate longitude and latitude values
+    lon_list = [coord[0] for coord in lon_lat_pairs]
+    lat_list = [coord[1] for coord in lon_lat_pairs]
+    
+    # Map each boolean value to a color
+    colors = [color_true if val else color_false for val in bool_values]
+    
+    # Define the buffer and extent for the map view
+    buffer = 5
+    min_lon, max_lon = min(lon_list) - buffer, max(lon_list) + buffer
+    min_lat, max_lat = min(lat_list) - buffer, max(lat_list) + buffer
+    
+    # Create the figure and axis with Cartopy projection
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8), subplot_kw={'projection': ccrs.PlateCarree()})
+    
+    # Plot the points colored by their boolean value
+    ax.scatter(lon_list, lat_list, color=colors, s=20, transform=ccrs.PlateCarree())
+    
+    # Use the heatmap styling for the map (this function was defined elsewhere)
+    # You can simply add features like land, ocean, borders, etc.
+    def heatmap_style_map(ax, title, extent=None):
+        ax.add_feature(cfeature.LAND, facecolor='lightgray')
+        ax.add_feature(cfeature.OCEAN, facecolor='lightblue')
+        ax.add_feature(cfeature.BORDERS, linestyle=':', edgecolor='black', linewidth=0.5)
+        ax.add_feature(cfeature.COASTLINE, edgecolor='black', linewidth=0.5)
+        ax.set_title(title, fontsize=14)
+        if extent:
+            ax.set_extent(extent, crs=ccrs.PlateCarree())
+        # Adding grid lines with labels
+        gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', linestyle='--')
+        gl.top_labels = gl.right_labels = False
+
+    # Apply the styling to the plot
+    heatmap_style_map(ax, "", extent=[min_lon, max_lon, min_lat, max_lat])
+    
+    # Create proxy artists for the legend
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], marker='o', color='w', label=legend_true, markerfacecolor=color_true, markersize=8),
+        Line2D([0], [0], marker='o', color='w', label=legend_false, markerfacecolor=color_false, markersize=8)
+    ]
+    ax.legend(handles=legend_elements, loc="lower left", fontsize=10)
+    
+    # Save and clear the plot
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300)
+    plt.clf()
+
+def plot_heatmap_category(lon_lat_pairs: list[tuple[float, float]], 
+                          category_values, 
+                          output_file: str, 
+                          categories_order: list[str],
+                          legend_labels: list[str],
+                          colors: list[str]):
+    """
+    Plots a categorical heatmap on a map projection using given longitude-latitude pairs and corresponding
+    category values.
+    
+    Parameters:
+        lon_lat_pairs (list of tuple[float, float]): A list of (lon, lat) coordinate pairs.
+        category_values (list or np.ndarray): A categorical array of identifiers corresponding to each coordinate.
+        output_file (str): The path to save the output plot.
+        categories_order (list of str): The list of expected category identifiers (e.g., ["SPWP", "Diesel", "Equivalent"]).
+        legend_labels (list of str): Legend texts corresponding to each category (e.g., ["SPWP system is cost-effective", 
+                                     "Diesel system is cost-effective", "Equivalent cost-effectiveness"]).
+        colors (list of str): Colors corresponding to each category, in the same order as categories_order.
+    """
+    import matplotlib.pyplot as plt
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
+
+    # Validate input lengths.
+    if len(lon_lat_pairs) != len(category_values):
+         raise ValueError("Length of lon_lat_pairs must equal the length of category_values.")
+    if not (len(categories_order) == len(legend_labels) == len(colors)):
+         raise ValueError("categories_order, legend_labels, and colors must have the same length.")
+    
+    # Create a mapping from category identifiers to colors.
+    mapping = dict(zip(categories_order, colors))
+    
+    # Verify that each category value is present in the expected categories.
+    for cat in category_values:
+        if cat not in categories_order:
+             raise ValueError(f"Category '{cat}' not found in categories_order.")
+    
+    # Map each category value to its corresponding color.
+    point_colors = [mapping[cat] for cat in category_values]
+    
+    # Unpack the longitude and latitude components from the coordinate pairs.
+    lon_list = [coord[0] for coord in lon_lat_pairs]
+    lat_list = [coord[1] for coord in lon_lat_pairs]
+    
+    # Determine map extent with a simple buffer.
+    buffer = 5
+    min_lon, max_lon = min(lon_list) - buffer, max(lon_list) + buffer
+    min_lat, max_lat = min(lat_list) - buffer, max(lat_list) + buffer
+
+    # Create the map figure using a Cartopy PlateCarree projection.
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8), subplot_kw={'projection': ccrs.PlateCarree()})
+    ax.scatter(lon_list, lat_list, color=point_colors, s=20, transform=ccrs.PlateCarree())
+
+    # Add some base map features.
+    ax.add_feature(cfeature.LAND, facecolor='lightgray')
+    ax.add_feature(cfeature.OCEAN, facecolor='lightblue')
+    ax.add_feature(cfeature.BORDERS, linestyle=':', edgecolor='black', linewidth=0.5)
+    ax.add_feature(cfeature.COASTLINE, edgecolor='black', linewidth=0.5)
+    ax.set_extent([min_lon, max_lon, min_lat, max_lat], crs=ccrs.PlateCarree())
+    gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', linestyle='--')
+    gl.top_labels = False
+    gl.right_labels = False
+
+    # Create legend handles for each category.
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], marker='o', color='w', label=leg, markerfacecolor=col, markersize=8)
+        for leg, col in zip(legend_labels, colors)
+    ]
+    ax.legend(handles=legend_elements, loc="lower left", fontsize=10)
+
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300)
+    plt.clf()
 
 
 def mask_lon_lat(lon: np.ndarray, lat: np.ndarray, country_name: str | None = None, continent: str | None = None, plot: bool = True) -> list[tuple[float, float]]:

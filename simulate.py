@@ -402,7 +402,14 @@ if __name__ == "__main__":
         results, weather = run_pv_simulation(solar_radiation_ds, target_latitude, target_longitude)
         logger.info(f"Simulated PV system at {target_longitude}, {target_latitude} in {perf_counter()-start_simul:.2f} seconds.")
         
-        losses, costs, pareto_indices, hyperparams = run_optimisation(results, OPTIM_NUM_PANELS_RANGE, OPTIM_NUM_STORAGE_FACTOR_RANGE, initial_tank_level_frac=1.0, target_loss=None)
+        losses, costs, pareto_indices, hyperparams = run_optimisation(
+            results, 
+            OPTIM_NUM_PANELS_RANGE, 
+            OPTIM_NUM_STORAGE_FACTOR_RANGE, 
+            pattern=PATTERN,
+            initial_tank_level_frac=1.0, 
+            target_loss=None
+        )
         plot_optimisation_results(
             panels_range=OPTIM_NUM_PANELS_RANGE, 
             storage_range=OPTIM_NUM_STORAGE_FACTOR_RANGE, 
@@ -410,7 +417,6 @@ if __name__ == "__main__":
             costs=costs, 
             pareto_indices=pareto_indices,
             hyperparams=hyperparams,
-            pattern=PATTERN
             )
         
         # ----------------- Analysis of best configuration solution at single location ----------------- #
