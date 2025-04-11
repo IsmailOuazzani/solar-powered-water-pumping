@@ -10,3 +10,4 @@ regionmask
 calplot
 geopandas
 numba
+statsmodels
