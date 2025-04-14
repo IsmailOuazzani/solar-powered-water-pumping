@@ -56,6 +56,9 @@ def plot_loss_function(deficit, demand, loss_fn: Callable):
     plt.clf()
 
 
+# TODO: shortage days loss function
+# add growth term for consecutive days of shortage
+
 if __name__ == "__main__":
     demand = [20] * 14
     deficit = [0,0,0,20,20,20,0,0,0,20,0,0,0,0]
